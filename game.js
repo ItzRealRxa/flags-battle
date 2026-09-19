@@ -22,6 +22,8 @@ let isPaused = false;
 let gateOpen = false;
 let isRecording = false;
 let mediaRecorder = null;
+let winnerMarble = null;
+let winnerBannerAnim = 0;
 
 // Dynamic Camera
 const camera = {
@@ -144,17 +146,18 @@ class Marble {
 
       // Check for first place
       if (this.finishRank === 1) {
+        winnerMarble = this; // Draw 1st place champion showcase directly onto the canvas!
         sfx.playVictory();
         showWinnerBanner(this);
         if (typeof updateVideoTitles === 'function') updateVideoTitles(this);
 
-        // Always stop recording when 1st place finishes!
+        // Keep recording for 3.5 seconds so the 1st place podium is captured in the video!
         if (isRecording) {
           setTimeout(() => {
             if (isRecording && typeof stopRecording === 'function') {
               stopRecording();
             }
-          }, 1800); // 1.8s of photo finish and winner banner, then auto-stop!
+          }, 3500); // 3.5s of epic champion celebration in the recorded video!
         }
       }
       updateLeaderboardUI();
@@ -445,6 +448,8 @@ function initRace() {
   raceLog = [];
   renderFeedUI();
   gateOpen = false;
+  winnerMarble = null;
+  winnerBannerAnim = 0;
   document.getElementById('winnerOverlay').classList.remove('active');
 
   buildTrack();
@@ -950,6 +955,9 @@ function gameLoop(now) {
   // YouTube Shorts Header & HUD
   drawShortsHUD();
 
+  // Draw 1st Place Podium Celebration directly onto canvas (recorded into video!)
+  drawCanvasWinnerOverlay();
+
   ctx.restore();
 
   requestAnimationFrame(gameLoop);
@@ -1000,6 +1008,109 @@ function drawShortsHUD() {
     ctx.textAlign = 'center';
     ctx.fillText(`🔥 CURRENT LEADER: ${camera.leadMarble.name}`, V_WIDTH / 2, 186);
   }
+
+  ctx.restore();
+}
+
+// 1st Place Champion Canvas Showcase (Recorded Directly Into The Video!)
+function drawCanvasWinnerOverlay() {
+  if (!winnerMarble) {
+    winnerBannerAnim = 0;
+    return;
+  }
+
+  winnerBannerAnim = Math.min(1, winnerBannerAnim + 0.05);
+  const alpha = winnerBannerAnim;
+
+  ctx.save();
+
+  // Dark dramatic vignette backdrop
+  ctx.fillStyle = `rgba(5, 8, 18, ${alpha * 0.88})`;
+  ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+
+  const centerY = V_HEIGHT * 0.48;
+
+  // Podium Card Container
+  ctx.save();
+  ctx.translate(V_WIDTH / 2, centerY);
+  ctx.scale(alpha, alpha);
+
+  // Card background with glowing golden neon border
+  const cardW = 860;
+  const cardH = 960;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.96)';
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 8;
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 40;
+  ctx.beginPath();
+  ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 40);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Animated Floating Golden Crown
+  const floatOffset = Math.sin(Date.now() * 0.006) * 12;
+  ctx.font = '95px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('👑', V_WIDTH / 2, centerY - 330 + floatOffset);
+
+  // 1ST PLACE WINNER Header
+  ctx.font = '900 52px Montserrat, sans-serif';
+  ctx.fillStyle = '#fbbf24';
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 25;
+  ctx.textAlign = 'center';
+  ctx.fillText('🏆 1ST PLACE CHAMPION! 🏆', V_WIDTH / 2, centerY - 230);
+
+  // Giant Flag Texture (280x280 circular flag medal)
+  const flagRadius = 145;
+  const flagY = centerY - 50;
+
+  // Outer gold ring
+  ctx.beginPath();
+  ctx.arc(V_WIDTH / 2, flagY, flagRadius + 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#fbbf24';
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 30;
+  ctx.fill();
+
+  // Flag circle clip
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(V_WIDTH / 2, flagY, flagRadius, 0, Math.PI * 2);
+  ctx.clip();
+
+  const img = flagImages[winnerMarble.code];
+  if (img && img.complete && img.naturalWidth > 0) {
+    ctx.drawImage(img, V_WIDTH / 2 - flagRadius, flagY - flagRadius, flagRadius * 2, flagRadius * 2);
+  } else {
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(V_WIDTH / 2 - flagRadius, flagY - flagRadius, flagRadius * 2, flagRadius * 2);
+    ctx.font = '900 50px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(winnerMarble.code.toUpperCase(), V_WIDTH / 2, flagY + 16);
+  }
+  ctx.restore();
+
+  // Winner Country Name in huge text
+  ctx.font = '900 66px Montserrat, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+  ctx.shadowBlur = 12;
+  ctx.textAlign = 'center';
+  ctx.fillText(winnerMarble.name.toUpperCase(), V_WIDTH / 2, centerY + 200);
+
+  // Subtitle / Achievement
+  ctx.font = '800 28px Inter, sans-serif';
+  ctx.fillStyle = '#38bdf8';
+  ctx.shadowBlur = 0;
+  ctx.fillText('🥇 OUTPACED 197 NATIONS & WON GOLD!', V_WIDTH / 2, centerY + 260);
+
+  // YouTube Shorts Engagement Callout
+  ctx.font = '700 24px Inter, sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(`💬 Comment "${winnerMarble.name}" if you guessed right!`, V_WIDTH / 2, centerY + 320);
 
   ctx.restore();
 }
