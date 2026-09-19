@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Shorts - Country Marble Race (197 Nations)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- 9:16 Vertical Shorts Canvas Frame -->
+    <div class="viewport-frame">
+
+      <!-- Loading Screen -->
+      <div id="loader" class="loader-screen">
+        <h2 style="font-size: 1.4rem; font-weight: 800; color: #fff; letter-spacing: 0.05em;">PREPARING 197 MARBLES...</h2>
+        <div class="progress-bar-bg">
+          <div id="loadProgress" class="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- The High-Res 9:16 Canvas (1080x1920 internal) -->
+      <canvas id="battleCanvas"></canvas>
+
+      <!-- Victory Showcase Overlay -->
+      <div id="winnerOverlay" class="winner-overlay">
+        <div class="winner-crown">🏆</div>
+        <div class="winner-title">RACE CHAMPION!</div>
+        <div class="winner-flag-card">
+          <img id="winnerFlag" src="" alt="Winner Flag">
+        </div>
+        <div id="winnerName" class="winner-name">Country Name</div>
+        <div id="winnerStats" class="winner-stats">1st Place • Fastest Downhill Racer</div>
+        <button id="restartModalBtn" class="btn" style="padding: 12px 28px;">🏁 Race Again</button>
+      </div>
+
+    </div>
+
+    <!-- Center Panel: Tournament Config & Finish Log -->
+    <div class="side-panel">
+
+      <!-- Live Race Status -->
+      <div class="card">
+        <div class="card-title">🏎️ Live Race Status</div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div id="aliveCount" class="stat-val alive">197</div>
+            <div class="stat-lbl">Racing</div>
+          </div>
+          <div class="stat-box">
+            <div id="eliminatedCount" class="stat-val" style="color: #fbbf24;">0</div>
+            <div class="stat-lbl">🏁 Finished</div>
+          </div>
+        </div>
+        <div class="mvp-box">
+          <div class="stat-lbl" style="margin: 0;">LEADER:</div>
+          <div id="topKiller" class="mvp-name">Waiting...</div>
+        </div>
+      </div>
+
+      <!-- Continent Selector -->
+      <div class="card">
+        <div class="card-title">🌍 Select Region</div>
+        <div class="continent-grid">
+          <button class="continent-btn active" data-continent="All">
+            <span>🌍 All World</span>
+            <span class="continent-count">197 flags</span>
+          </button>
+          <button class="continent-btn" data-continent="Asia">
+            <span>🌏 Asia</span>
+            <span class="continent-count">49 flags</span>
+          </button>
+          <button class="continent-btn" data-continent="Africa">
+            <span>🌍 Africa</span>
+            <span class="continent-count">54 flags</span>
+          </button>
+          <button class="continent-btn" data-continent="Europe">
+            <span>🏰 Europe</span>
+            <span class="continent-count">44 flags</span>
+          </button>
+          <button class="continent-btn" data-continent="Americas">
+            <span>🌎 Americas</span>
+            <span class="continent-count">35 flags</span>
+          </button>
+          <button class="continent-btn" data-continent="Oceania">
+            <span>🏝️ Oceania</span>
+            <span class="continent-count">14 flags</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Difficulty Selector -->
+      <div class="card">
+        <div class="card-title">⚡ Course Difficulty</div>
+        <div class="difficulty-grid">
+          <button class="diff-btn" data-diff="Easy">
+            <span class="diff-icon">🟢</span>
+            <span class="diff-title">Easy</span>
+            <span class="diff-sub">Chill Roll</span>
+          </button>
+          <button class="diff-btn active" data-diff="Normal">
+            <span class="diff-icon">🟡</span>
+            <span class="diff-title">Normal</span>
+            <span class="diff-sub">Balanced</span>
+          </button>
+          <button class="diff-btn" data-diff="Hard">
+            <span class="diff-icon">🔴</span>
+            <span class="diff-title">Hard</span>
+            <span class="diff-sub">Full Chaos</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Finish Line Order Log -->
+      <div class="card kill-feed-container">
+        <div class="card-title">🏁 Finishing Order</div>
+        <div id="killFeedList" class="kill-feed-list">
+          <div style="font-size: 0.8rem; color: #64748b; text-align: center; padding: 20px;">
+            Awaiting gate drop...
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Panel: Studio Deck, Recorder & Auto Title Generator (Red Box Area) -->
+    <div class="studio-panel">
+
+      <!-- Studio Controls -->
+      <div class="card controls-card">
+        <div class="card-title">🎬 Studio Controls</div>
+        <button id="startBtn" class="btn btn-hero">🚀 Drop Gate & Race</button>
+        <div class="control-row">
+          <button id="pauseBtn" class="btn btn-secondary" disabled>⏸️ Pause</button>
+          <button id="soundBtn" class="btn btn-secondary">🔊 Audio ON</button>
+        </div>
+      </div>
+
+      <!-- 9:16 Shorts Video Recorder Deck -->
+      <div class="card recorder-card">
+        <div class="card-title">🎥 Shorts Video Recorder</div>
+        <div class="rec-status-box" id="recStatusBox">
+          <div class="rec-dot" id="recDot"></div>
+          <span id="recStatusText">STANDBY • 1080x1920 60FPS</span>
+          <span id="recTimer" class="rec-timer">00:00</span>
+        </div>
+        <button id="recordBtn" class="btn btn-record">⏺️ Start Recording Short</button>
+        
+        <label class="auto-stop-label">
+          <input type="checkbox" id="autoStopRec" checked>
+          <span>⚡ Auto-stop & download video on 1st place win</span>
+        </label>
+      </div>
+
+      <!-- AI YouTube Shorts Title Generator -->
+      <div class="card title-gen-card">
+        <div class="title-gen-header">
+          <div class="card-title" style="margin: 0;">✨ Auto Video Titles</div>
+          <button id="refreshTitlesBtn" class="icon-btn" title="Generate New Variations">🎲 Shuffle</button>
+        </div>
+        <div class="title-instructions">Click any title below to copy directly to clipboard:</div>
+        <div class="title-list" id="titleList">
+          <!-- Populated dynamically via JS -->
+        </div>
+
+        <div class="tags-section">
+          <div class="tags-header">
+            <span>Viral Tags & Description:</span>
+            <button id="copyTagsBtn" class="copy-small-btn">📋 Copy Description</button>
+          </div>
+          <textarea id="videoTagsBox" class="tags-textarea" readonly></textarea>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="countries.js"></script>
+  <script src="audio.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
