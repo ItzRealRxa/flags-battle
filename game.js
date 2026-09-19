@@ -1101,26 +1101,46 @@ function startRecording() {
   try {
     const stream = canvas.captureStream(60);
     recordedChunks = [];
-    const options = { mimeType: 'video/webm;codecs=vp9' };
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) delete options.mimeType;
 
+    // Prioritize MP4 formats (H.264 / AVC1) supported by Chromium & Safari
+    const preferredTypes = [
+      'video/mp4;codecs=avc1',
+      'video/mp4;codecs=h264',
+      'video/mp4',
+      'video/webm;codecs=h264',
+      'video/webm;codecs=vp9',
+      'video/webm'
+    ];
+
+    let chosenMime = '';
+    for (const type of preferredTypes) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
+        chosenMime = type;
+        break;
+      }
+    }
+
+    const options = chosenMime ? { mimeType: chosenMime } : {};
     mediaRecorder = new MediaRecorder(stream, options);
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) recordedChunks.push(e.data);
+      if (e.data && e.data.size > 0) recordedChunks.push(e.data);
     };
     mediaRecorder.onstop = () => {
       clearInterval(recTimerInterval);
       if (recDot) recDot.classList.remove('active');
-      if (recStatusText) recStatusText.innerText = 'STANDBY • 1080x1920 60FPS';
+      if (recStatusText) recStatusText.innerText = 'STANDBY • 1080x1920 MP4 60FPS';
       recordBtn.classList.remove('recording');
-      recordBtn.innerText = '⏺️ Start Recording Short';
+      recordBtn.innerText = '⏺️ Start Recording Short (.MP4)';
 
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const blobType = chosenMime.includes('mp4') ? chosenMime : 'video/mp4';
+      const blob = new Blob(recordedChunks, { type: blobType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Country_Marble_Race_${selectedContinent}_${Date.now()}.webm`;
+      a.download = `Country_Marble_Race_${selectedContinent}_${Date.now()}.mp4`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     };
 
@@ -1134,9 +1154,9 @@ function startRecording() {
     }, 1000);
 
     if (recDot) recDot.classList.add('active');
-    if (recStatusText) recStatusText.innerText = 'RECORDING 60FPS HD';
+    if (recStatusText) recStatusText.innerText = 'RECORDING MP4 60FPS HD';
     recordBtn.classList.add('recording');
-    recordBtn.innerText = '⏹️ Stop & Save Video';
+    recordBtn.innerText = '⏹️ Stop & Save .MP4';
   } catch (err) {
     alert("Recording failed: " + err.message);
   }
