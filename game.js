@@ -64,6 +64,11 @@ const BOMB_ROUND_DURATION = 4.5;
 let bombTransferCooldown = 0;
 let bombAuraAnim = 0;
 
+// Black Hole Vortex Specs
+let blackHoleVortexTime = 0;
+const BLACK_HOLE_EVENT_HORIZON = 52;
+let accretionDiskAngle = 0;
+
 // Track Obstacles
 let walls = [];
 let pegs = [];
@@ -133,7 +138,7 @@ class Marble {
 
   update() {
     if (this.finished) {
-      if (currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag') {
+      if (currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag' || currentGameMode === 'black_hole') {
         // Eliminated marbles disappear completely from the arena
         return;
       }
@@ -707,7 +712,30 @@ function initRace() {
   }
 
   // Setup mode-specific layout
-  if (currentGameMode === 'bomb_tag') {
+  if (currentGameMode === 'black_hole') {
+    // BLACK HOLE VORTEX: Spawn in outer cosmic orbital disk with angular momentum
+    blackHoleVortexTime = 0;
+    const total = targetCountries.length;
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((country, i) => {
+      // Spawn in outer orbital disc between R=220 and R=440
+      const r = 210 + Math.sqrt((i + 0.5) / total) * 230;
+      const theta = (i / total) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+      const x = ARENA_CX + Math.cos(theta) * r;
+      const y = ARENA_CY + Math.sin(theta) * r;
+      const m = new Marble(country, x, y);
+      // Tangential orbital velocity with slight perturbation
+      const vOrbit = Math.sqrt(2400 / (r + 10)) + (Math.random() - 0.5) * 0.8;
+      m.vx = -Math.sin(theta) * vOrbit;
+      m.vy = Math.cos(theta) * vOrbit;
+      marbles.push(m);
+    });
+
+    camera.y = 0;
+    camera.targetY = 0;
+    camera.leadMarble = marbles[0] || null;
+  } else if (currentGameMode === 'bomb_tag') {
     // BOMB TAG: Spawn inside active battle arena and assign initial ticking bomb
     const total = targetCountries.length;
     const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
@@ -1178,8 +1206,150 @@ function handleBombTagPhysics() {
   }
 }
 
+// Black Hole Vortex Physics Engine
+function handleBlackHolePhysics() {
+  blackHoleVortexTime += 0.016;
+  accretionDiskAngle += 0.018;
+
+  // Spatial Marble-to-Marble Collisions inside the Accretion Disk
+  marbles.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < marbles.length; i++) {
+    const m1 = marbles[i];
+    if (m1.finished) continue;
+
+    for (let j = i + 1; j < marbles.length; j++) {
+      const m2 = marbles[j];
+      if (m2.finished) continue;
+      if (m2.y - m1.y > m1.radius + m2.radius) break;
+
+      const dx = m2.x - m1.x;
+      const dy = m2.y - m1.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = m1.radius + m2.radius;
+
+      if (dist < minDist && dist > 0) {
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        m1.x -= nx * overlap * 0.5;
+        m1.y -= ny * overlap * 0.5;
+        m2.x += nx * overlap * 0.5;
+        m2.y += ny * overlap * 0.5;
+
+        const kx = m1.vx - m2.vx;
+        const ky = m1.vy - m2.vy;
+        const p = 2 * (nx * kx + ny * ky) / (m1.mass + m2.mass);
+
+        m1.vx -= p * m2.mass * nx;
+        m1.vy -= p * m2.mass * ny;
+        m2.vx += p * m1.mass * nx;
+        m2.vy += p * m1.mass * ny;
+
+        if (Math.hypot(kx, ky) > 3) {
+          sfx.playMarbleClink(0.3);
+        }
+      }
+    }
+
+    // Gravitational Pull & Orbital Dynamics
+    const dx = ARENA_CX - m1.x;
+    const dy = ARENA_CY - m1.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > 0) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const tx = -ny; // Tangential vector for vortex spin
+      const ty = nx;
+
+      // Gravity pulls inward, scaling smoothly and escalating over time
+      const gravityEscalation = 0.18 + Math.min(0.42, blackHoleVortexTime * 0.0075);
+      const inwardPull = (420 / (dist + 30)) * gravityEscalation;
+      m1.vx += nx * inwardPull;
+      m1.vy += ny * inwardPull;
+
+      // Whirlpool spin boost
+      const spinSpeed = Math.min(0.24, 22 / (dist + 35));
+      m1.vx += tx * spinSpeed;
+      m1.vy += ty * spinSpeed;
+
+      // Micro turbulence
+      m1.vx += (Math.random() - 0.5) * 0.08;
+      m1.vy += (Math.random() - 0.5) * 0.08;
+
+      m1.vx *= 0.993;
+      m1.vy *= 0.993;
+
+      m1.x += m1.vx;
+      m1.y += m1.vy;
+
+      // Speed trail for leader / outermost orbiters
+      if (m1 === camera.leadMarble && Math.hypot(m1.vx, m1.vy) > 3) {
+        m1.trail.unshift({ x: m1.x, y: m1.y, alpha: 1 });
+        if (m1.trail.length > 8) m1.trail.pop();
+      } else if (m1.trail.length > 0) {
+        m1.trail.pop();
+      }
+
+      // Outer boundary containment (Bounce back into vortex)
+      if (dist > 450) {
+        m1.x = ARENA_CX - nx * 449;
+        m1.y = ARENA_CY - ny * 449;
+        const dot = m1.vx * nx + m1.vy * ny;
+        if (dot < 0) {
+          m1.vx -= 1.6 * dot * nx;
+          m1.vy -= 1.6 * dot * ny;
+        }
+      }
+
+      // Singularity Crossing / Event Horizon Consumption!
+      if (dist <= BLACK_HOLE_EVENT_HORIZON && !m1.finished) {
+        m1.finished = true;
+        finishedMarbles.push(m1);
+        sfx.playBumper();
+
+        // Cosmic particle implode celebration
+        createCelebration(m1.x, m1.y);
+        const voidColors = ['#a855f7', '#6366f1', '#06b6d4', '#ec4899', '#ffffff'];
+        for (let p = 0; p < 30; p++) {
+          particles.push(new Particle(m1.x, m1.y, voidColors[p % voidColors.length], 12));
+        }
+
+        const alive = marbles.filter(m => !m.finished);
+        m1.finishRank = alive.length + 1;
+        addFeedItem(`🌌 CONSUMED: ${m1.name} Sucked into the Singularity! (${alive.length} Left)`, '#a855f7');
+
+        // Check Victory (Last Nation Standing in Orbit!)
+        if (alive.length === 1 && !winnerMarble) {
+          winnerMarble = alive[0];
+          winnerMarble.finished = true;
+          winnerMarble.finishRank = 1;
+          sfx.playVictory();
+          createCelebration(winnerMarble.x, winnerMarble.y);
+          showWinnerBanner(winnerMarble);
+          if (typeof updateVideoTitles === 'function') updateVideoTitles(winnerMarble);
+
+          if (isRecording) {
+            setTimeout(() => {
+              if (isRecording && typeof stopRecording === 'function') {
+                stopRecording();
+              }
+            }, 3500);
+          }
+        }
+        updateLeaderboardUI();
+      }
+    }
+  }
+}
+
 // Physics & Collision Handling
 function handlePhysics() {
+  if (currentGameMode === 'black_hole') {
+    handleBlackHolePhysics();
+    return;
+  }
   if (currentGameMode === 'bomb_tag') {
     handleBombTagPhysics();
     return;
@@ -1360,6 +1530,23 @@ function handlePhysics() {
 
 // Track Leader & Update Action Camera
 function updateCamera() {
+  if (currentGameMode === 'black_hole') {
+    camera.targetY = 0;
+    camera.y = 0;
+    // In Black Hole, the leader is the one in the safest outermost orbit (furthest from singularity)
+    const active = marbles.filter(m => !m.finished);
+    if (active.length > 0) {
+      active.sort((a, b) => {
+        const da = Math.hypot(a.x - ARENA_CX, a.y - ARENA_CY);
+        const db = Math.hypot(b.x - ARENA_CX, b.y - ARENA_CY);
+        return db - da; // Furthest from center is in 1st place!
+      });
+      camera.leadMarble = active[0];
+    } else {
+      camera.leadMarble = finishedMarbles[finishedMarbles.length - 1] || null;
+    }
+    return;
+  }
   if (currentGameMode === 'bomb_tag') {
     camera.targetY = 0;
     camera.y = 0;
@@ -1454,7 +1641,8 @@ function showWinnerBanner(winner) {
   flagImg.src = getFlagUrl(winner.code);
   nameElem.innerText = winner.name;
   let stats = `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
-  if (currentGameMode === 'bomb_tag') stats = `🏆 HOT POTATO CHAMPION: SURVIVED ALL EXPLOSIONS!`;
+  if (currentGameMode === 'black_hole') stats = `🏆 SINGULARITY SURVIVOR: ESCAPED THE EVENT HORIZON!`;
+  else if (currentGameMode === 'bomb_tag') stats = `🏆 HOT POTATO CHAMPION: SURVIVED ALL EXPLOSIONS!`;
   else if (currentGameMode === 'circle_survivor') stats = `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`;
   else if (currentGameMode === 'concentric_rings') stats = `🏆 FIRST NATION TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
   statsElem.innerText = stats;
@@ -1773,8 +1961,104 @@ function drawBombTagArena(ctx) {
   ctx.restore();
 }
 
+// Render Black Hole Vortex Cosmic Arena
+function drawBlackHoleArena(ctx) {
+  ctx.save();
+
+  // Cosmic Void Deep Space Floor
+  const floorGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 30, ARENA_CX, ARENA_CY, 460);
+  floorGrad.addColorStop(0, '#020005');
+  floorGrad.addColorStop(0.35, '#0b0217');
+  floorGrad.addColorStop(0.75, '#120428');
+  floorGrad.addColorStop(1, '#05010e');
+  ctx.fillStyle = floorGrad;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 450, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Outer Cosmic Horizon Boundary
+  ctx.strokeStyle = '#a855f7';
+  ctx.shadowColor = '#9333ea';
+  ctx.shadowBlur = 25;
+  ctx.lineWidth = 14;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 445, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Swirling Accretion Spiral Arms (Rotating Disk)
+  ctx.save();
+  ctx.translate(ARENA_CX, ARENA_CY);
+  ctx.rotate(accretionDiskAngle);
+
+  // 4 Spiral Dust Stream Waves
+  for (let arm = 0; arm < 4; arm++) {
+    const baseAngle = (arm * Math.PI) / 2;
+    ctx.strokeStyle = arm % 2 === 0 ? 'rgba(168, 85, 247, 0.22)' : 'rgba(6, 182, 212, 0.22)';
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    for (let r = 70; r < 440; r += 10) {
+      const theta = baseAngle + (r / 65);
+      const px = Math.cos(theta) * r;
+      const py = Math.sin(theta) * r;
+      if (r === 70) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  // Orbital Concentric Distance Gridlines
+  [140, 230, 320, 400].forEach((r, idx) => {
+    ctx.strokeStyle = idx % 2 === 0 ? 'rgba(168, 85, 247, 0.12)' : 'rgba(6, 182, 212, 0.10)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.restore();
+
+  // Relativistic Photon Ring (Glowing Golden-Cyan Halo around Event Horizon)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 74, 0, Math.PI * 2);
+  const photonGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 45, ARENA_CX, ARENA_CY, 78);
+  photonGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+  photonGrad.addColorStop(0.5, 'rgba(236, 72, 153, 0.65)');
+  photonGrad.addColorStop(0.85, 'rgba(6, 182, 212, 0.95)');
+  photonGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+  ctx.fillStyle = photonGrad;
+  ctx.shadowColor = '#06b6d4';
+  ctx.shadowBlur = 35;
+  ctx.fill();
+
+  // Pure Pitch-Black Singularity Core (Event Horizon)
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, BLACK_HOLE_EVENT_HORIZON, 0, Math.PI * 2);
+  ctx.fillStyle = '#000000';
+  ctx.shadowColor = '#000000';
+  ctx.shadowBlur = 0;
+  ctx.fill();
+
+  // Inner Horizon Rim Stroke
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#c084fc';
+  ctx.stroke();
+
+  // Floating Vortex Singularity Glyph
+  ctx.font = '32px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🌪️', ARENA_CX, ARENA_CY);
+  ctx.restore();
+
+  ctx.restore();
+}
+
 // Render Track & Environment
 function drawTrackEnvironment(ctx) {
+  if (currentGameMode === 'black_hole') {
+    drawBlackHoleArena(ctx);
+    return;
+  }
   if (currentGameMode === 'bomb_tag') {
     drawBombTagArena(ctx);
     return;
@@ -2046,7 +2330,9 @@ function drawShortsHUD() {
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 15;
   let regionTitle = "COUNTRY MARBLE RACE";
-  if (currentGameMode === 'bomb_tag') {
+  if (currentGameMode === 'black_hole') {
+    regionTitle = (selectedContinent === 'All' ? "BLACK HOLE VORTEX" : `${selectedContinent.toUpperCase()} BLACK HOLE`);
+  } else if (currentGameMode === 'bomb_tag') {
     regionTitle = (selectedContinent === 'All' ? "BOMB TAG: HOT POTATO" : `${selectedContinent.toUpperCase()} BOMB TAG`);
   } else if (currentGameMode === 'circle_survivor') {
     regionTitle = (selectedContinent === 'All' ? "CIRCLE SURVIVOR: BATTLE ROYALE" : `${selectedContinent.toUpperCase()} CIRCLE SURVIVOR`);
@@ -2062,7 +2348,9 @@ function drawShortsHUD() {
   ctx.shadowBlur = 0;
   const aliveCount = marbles.filter(m => !m.finished).length;
   let countLabel = `${marbles.length} NATIONS`;
-  if (currentGameMode === 'bomb_tag') {
+  if (currentGameMode === 'black_hole') {
+    countLabel = `${aliveCount} IN ORBIT • GRAVITY: ${(1 + blackHoleVortexTime * 0.025).toFixed(1)}x`;
+  } else if (currentGameMode === 'bomb_tag') {
     countLabel = `${aliveCount} SURVIVORS • DETONATION: ${Math.max(0, bombTimer).toFixed(1)}s`;
   } else if (currentGameMode === 'circle_survivor') {
     countLabel = `${aliveCount} SURVIVORS REMAINING`;
@@ -2088,7 +2376,8 @@ function drawShortsHUD() {
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'center';
     let leaderLabel = `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
-    if (currentGameMode === 'bomb_tag') leaderLabel = `💣 TICKING BOMB: ${bombCarrier ? bombCarrier.name : 'None'} (${Math.max(0, bombTimer).toFixed(1)}s)`;
+    if (currentGameMode === 'black_hole') leaderLabel = `🪐 SAFEST ORBIT: ${camera.leadMarble.name}`;
+    else if (currentGameMode === 'bomb_tag') leaderLabel = `💣 TICKING BOMB: ${bombCarrier ? bombCarrier.name : 'None'} (${Math.max(0, bombTimer).toFixed(1)}s)`;
     else if (currentGameMode === 'circle_survivor') leaderLabel = `🛡️ LAST STAND: ${camera.leadMarble.name}`;
     else if (currentGameMode === 'concentric_rings') leaderLabel = `🎯 CLOSEST TO CORE: ${camera.leadMarble.name}`;
     ctx.fillText(leaderLabel, V_WIDTH / 2, 186);
@@ -2147,7 +2436,8 @@ function drawCanvasWinnerOverlay() {
   ctx.shadowBlur = 25;
   ctx.textAlign = 'center';
   let championTitle = '🏆 1ST PLACE CHAMPION! 🏆';
-  if (currentGameMode === 'bomb_tag') championTitle = '💣 HOT POTATO CHAMPION! 💣';
+  if (currentGameMode === 'black_hole') championTitle = '🌪️ SINGULARITY SURVIVOR! 🌪️';
+  else if (currentGameMode === 'bomb_tag') championTitle = '💣 HOT POTATO CHAMPION! 💣';
   else if (currentGameMode === 'circle_survivor') championTitle = '🏆 LAST SURVIVOR CHAMPION! 🏆';
   else if (currentGameMode === 'concentric_rings') championTitle = '🏆 RING MAZE CHAMPION! 🏆';
   ctx.fillText(championTitle, V_WIDTH / 2, centerY - 230);
@@ -2195,7 +2485,8 @@ function drawCanvasWinnerOverlay() {
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
   let winSubtitle = `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
-  if (currentGameMode === 'bomb_tag') winSubtitle = `🥇 DODGED ALL TNT DETONATIONS & WON HOT POTATO!`;
+  if (currentGameMode === 'black_hole') winSubtitle = `🥇 ESCAPED THE EVENT HORIZON & SURVIVED THE VOID!`;
+  else if (currentGameMode === 'bomb_tag') winSubtitle = `🥇 DODGED ALL TNT DETONATIONS & WON HOT POTATO!`;
   else if (currentGameMode === 'circle_survivor') winSubtitle = `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`;
   else if (currentGameMode === 'concentric_rings') winSubtitle = `🥇 FIRST TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
   ctx.fillText(winSubtitle, V_WIDTH / 2, centerY + 260);
@@ -2208,7 +2499,7 @@ function drawCanvasWinnerOverlay() {
   ctx.restore();
 }
 
-// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings vs Bomb Tag)
+// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings vs Bomb Tag vs Black Hole)
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -2223,7 +2514,9 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       isPaused = false;
       const startBtn = document.getElementById('startBtn');
       if (startBtn) {
-        if (currentGameMode === 'bomb_tag') {
+        if (currentGameMode === 'black_hole') {
+          startBtn.innerText = '▶️ Start Vortex & Auto-Record';
+        } else if (currentGameMode === 'bomb_tag') {
           startBtn.innerText = '▶️ Start Bomb Tag & Auto-Record';
         } else if (currentGameMode === 'concentric_rings') {
           startBtn.innerText = '▶️ Start Ring Maze & Auto-Record';
@@ -2265,11 +2558,13 @@ document.getElementById('startBtn').addEventListener('click', () => {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = currentGameMode === 'bomb_tag'
-      ? '🔄 Restart Bomb Tag & Record'
-      : (currentGameMode === 'concentric_rings' 
-        ? '🔄 Restart Maze & Record' 
-        : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record'));
+    document.getElementById('startBtn').innerText = currentGameMode === 'black_hole'
+      ? '🔄 Restart Vortex & Record'
+      : (currentGameMode === 'bomb_tag'
+        ? '🔄 Restart Bomb Tag & Record'
+        : (currentGameMode === 'concentric_rings' 
+          ? '🔄 Restart Maze & Record' 
+          : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record')));
     document.getElementById('pauseBtn').disabled = false;
 
     // 1-Click Auto-Record
@@ -2513,49 +2808,61 @@ function stopRecording() {
 let currentWinner = null;
 
 const VIRAL_TITLE_TEMPLATES = [
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `💣 ${ctx.flagEmoji} ${ctx.count} Countries Pass The Ticking TNT: Who Explodes?! 💥 #shorts #bombtag`
-    : (ctx.mode === 'concentric_rings'
-      ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
-      : (ctx.mode === 'circle_survivor'
-        ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
-        : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`)),
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `😱 ${ctx.winnerHighlight} In The Most Insane Hot Potato Bomb Battle! 💣 #flagsbattle`
-    : (ctx.mode === 'concentric_rings'
-      ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
-      : (ctx.mode === 'circle_survivor'
-        ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
-        : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`)),
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `⚡ Extreme ${ctx.diff} Bomb Tag: ${ctx.count} Nations Bouncing & Passing TNT Before Detonation! 💥 #shorts`
-    : (ctx.mode === 'concentric_rings'
-      ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
-      : (ctx.mode === 'circle_survivor'
-        ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
-        : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`)),
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `🥇 ${ctx.winnerName} DODGES EVERY EXPLOSION TO WIN HOT POTATO! (${ctx.regionName} Edition) 🏆 #marblerace`
-    : (ctx.mode === 'concentric_rings'
-      ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
-      : (ctx.mode === 'circle_survivor'
-        ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
-        : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`)),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `🌪️ ${ctx.flagEmoji} ${ctx.count} Countries Sucked Into A Cosmic BLACK HOLE Singularity! 🌌 #shorts #blackhole`
+    : (ctx.mode === 'bomb_tag'
+      ? `💣 ${ctx.flagEmoji} ${ctx.count} Countries Pass The Ticking TNT: Who Explodes?! 💥 #shorts #bombtag`
+      : (ctx.mode === 'concentric_rings'
+        ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
+        : (ctx.mode === 'circle_survivor'
+          ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
+          : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`))),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `😱 ${ctx.winnerHighlight} Escaped The Event Horizon In The ${ctx.regionName} Black Hole! 🌪️ #flagsbattle`
+    : (ctx.mode === 'bomb_tag'
+      ? `😱 ${ctx.winnerHighlight} In The Most Insane Hot Potato Bomb Battle! 💣 #flagsbattle`
+      : (ctx.mode === 'concentric_rings'
+        ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
+        : (ctx.mode === 'circle_survivor'
+          ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
+          : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`))),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `⚡ Extreme ${ctx.diff} Black Hole: ${ctx.count} Nations Trapped In Cosmic Orbit Before Singularity! 🪐 #shorts`
+    : (ctx.mode === 'bomb_tag'
+      ? `⚡ Extreme ${ctx.diff} Bomb Tag: ${ctx.count} Nations Bouncing & Passing TNT Before Detonation! 💥 #shorts`
+      : (ctx.mode === 'concentric_rings'
+        ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
+        : (ctx.mode === 'circle_survivor'
+          ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
+          : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`))),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `🥇 ${ctx.winnerName} BECOMES THE ONLY COUNTRY TO SURVIVE THE BLACK HOLE! (${ctx.regionName}) 🏆 #marblerace`
+    : (ctx.mode === 'bomb_tag'
+      ? `🥇 ${ctx.winnerName} DODGES EVERY EXPLOSION TO WIN HOT POTATO! (${ctx.regionName} Edition) 🏆 #marblerace`
+      : (ctx.mode === 'concentric_rings'
+        ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
+        : (ctx.mode === 'circle_survivor'
+          ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
+          : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`))),
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `💣 CAN YOUR COUNTRY PASS THE TICKING BOMB IN TIME?! 🌍 #bombtag #shorts`
-    : (ctx.mode === 'concentric_rings'
-      ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
-      : (ctx.mode === 'circle_survivor'
-        ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
-        : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`)),
-  (ctx) => ctx.mode === 'bomb_tag'
-    ? `🏆 The Most Chaotic Bomb Tag Marble Battle You've Ever Seen! (${ctx.regionName}) 💣 #shorts`
-    : (ctx.mode === 'concentric_rings'
-      ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-      : (ctx.mode === 'circle_survivor'
-        ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-        : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`)),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `🌌 CAN YOUR COUNTRY ESCAPE THE EVENT HORIZON?! 🪐 #blackhole #shorts`
+    : (ctx.mode === 'bomb_tag'
+      ? `💣 CAN YOUR COUNTRY PASS THE TICKING BOMB IN TIME?! 🌍 #bombtag #shorts`
+      : (ctx.mode === 'concentric_rings'
+        ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
+        : (ctx.mode === 'circle_survivor'
+          ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
+          : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`))),
+  (ctx) => ctx.mode === 'black_hole'
+    ? `🏆 The Most Hypnotic Black Hole Marble Vortex You've Ever Seen! (${ctx.regionName}) 🌪️ #shorts`
+    : (ctx.mode === 'bomb_tag'
+      ? `🏆 The Most Chaotic Bomb Tag Marble Battle You've Ever Seen! (${ctx.regionName}) 💣 #shorts`
+      : (ctx.mode === 'concentric_rings'
+        ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+        : (ctx.mode === 'circle_survivor'
+          ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+          : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`))),
   (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`
 ];
 
@@ -2628,7 +2935,10 @@ function updateVideoTitles(winner = null) {
   let winText = `Who will reach the finish line?`;
   let modeTitle = "Downhill Marble Race Simulator";
 
-  if (currentGameMode === 'bomb_tag') {
+  if (currentGameMode === 'black_hole') {
+    modeTitle = "Black Hole Cosmic Vortex Simulator";
+    winText = winner ? `🥇 Singularity Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will escape the cosmic event horizon?`;
+  } else if (currentGameMode === 'bomb_tag') {
     modeTitle = "Bomb Tag Hot Potato Simulator";
     winText = winner ? `🥇 Hot Potato Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will pass the ticking bomb before detonation?`;
   } else if (currentGameMode === 'circle_survivor') {
