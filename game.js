@@ -48,6 +48,15 @@ let survivorObstacles = {
   orbitBumpers: []
 };
 
+// Concentric Rotating Rings Maze Specs (Multi-Layer Ring Maze)
+const CONCENTRIC_RINGS = [
+  { radius: 460, numGaps: 4, gapArc: 0.52, speed: -0.012, color: '#38bdf8', glow: '#0284c7', angle: 0, label: 'OUTER RING' },
+  { radius: 350, numGaps: 3, gapArc: 0.46, speed: 0.016, color: '#a855f7', glow: '#7e22ce', angle: 0, label: 'TIER 3' },
+  { radius: 240, numGaps: 2, gapArc: 0.40, speed: -0.022, color: '#ec4899', glow: '#be185d', angle: 0, label: 'TIER 2' },
+  { radius: 130, numGaps: 1, gapArc: 0.36, speed: 0.026, color: '#f59e0b', glow: '#b45309', angle: 0, label: 'CHOKE DOOR' }
+];
+const CORE_RADIUS = 50;
+
 // Track Obstacles
 let walls = [];
 let pegs = [];
@@ -108,6 +117,14 @@ class Marble {
         // Eliminated marbles disappear completely from the arena
         return;
       }
+      if (currentGameMode === 'concentric_rings') {
+        // Marbles that reach the core settle gently in the winner circle
+        this.vx *= 0.88;
+        this.vy *= 0.88;
+        this.x += this.vx;
+        this.y += this.vy;
+        return;
+      }
       // Downhill Race: Gentle slide in podium area
       this.vx *= 0.92;
       this.vy *= 0.92;
@@ -119,6 +136,61 @@ class Marble {
     if (this.bouncePulse > 0) this.bouncePulse -= 0.05;
 
     // Mode-specific Movement & Boundaries
+    if (currentGameMode === 'concentric_rings') {
+      // Inward funnel pull towards Center Core
+      const dx = ARENA_CX - this.x;
+      const dy = ARENA_CY - this.y;
+      const d = Math.hypot(dx, dy);
+
+      if (d > 15) {
+        this.vx += (dx / d) * 0.075;
+        this.vy += (dy / d) * 0.075;
+      }
+      this.vx += (Math.random() - 0.5) * 0.10;
+      this.vy += (Math.random() - 0.5) * 0.10;
+
+      this.vx *= 0.993;
+      this.vy *= 0.993;
+
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Speed trail for lead marble
+      if (this === camera.leadMarble && Math.hypot(this.vx, this.vy) > 3) {
+        this.trail.unshift({ x: this.x, y: this.y, alpha: 1 });
+        if (this.trail.length > 10) this.trail.pop();
+      } else if (this.trail.length > 0) {
+        this.trail.pop();
+      }
+
+      // Check Core Victory Condition (First marble into Core wins!)
+      if (d <= CORE_RADIUS + 12 && !this.finished) {
+        this.finished = true;
+        finishedMarbles.push(this);
+        this.finishRank = finishedMarbles.length;
+        sfx.playFinishCross();
+        createCelebration(this.x, this.y);
+
+        if (this.finishRank === 1) {
+          winnerMarble = this;
+          sfx.playVictory();
+          showWinnerBanner(this);
+          if (typeof updateVideoTitles === 'function') updateVideoTitles(this);
+
+          if (isRecording) {
+            setTimeout(() => {
+              if (isRecording && typeof stopRecording === 'function') {
+                stopRecording();
+              }
+            }, 3500);
+          }
+        }
+        addFeedItem(this.finishRank === 1 ? `🏆 CORE CHAMPION: ${this.name}` : `🥈 #${this.finishRank} Reached Core: ${this.name}`, this.finishRank === 1 ? '#fbbf24' : '#38bdf8');
+        updateLeaderboardUI();
+      }
+      return;
+    }
+
     if (currentGameMode === 'circle_survivor') {
       // Circle Survivor Physics:
       // Slight chaotic attraction/gravity keeping marbles bouncing dynamically
@@ -559,7 +631,37 @@ function initRace() {
   }
 
   // Setup mode-specific layout
-  if (currentGameMode === 'circle_survivor') {
+  if (currentGameMode === 'concentric_rings') {
+    // CONCENTRIC RINGS MAZE: Reset rings and spawn in outer orbital band
+    const mult = currentDifficulty === 'Easy' ? 0.75 : (currentDifficulty === 'Hard' ? 1.35 : 1.0);
+    CONCENTRIC_RINGS[0].speed = -0.012 * mult;
+    CONCENTRIC_RINGS[1].speed = 0.016 * mult;
+    CONCENTRIC_RINGS[2].speed = -0.022 * mult;
+    CONCENTRIC_RINGS[3].speed = 0.026 * mult;
+
+    CONCENTRIC_RINGS.forEach((r, idx) => {
+      r.angle = idx * 0.95;
+    });
+
+    const total = targetCountries.length;
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((country, i) => {
+      // Spawn in outer track band (between R=375 and R=445)
+      const r = 375 + Math.sqrt((i + 0.5) / total) * 70;
+      const theta = (i / total) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+      const x = ARENA_CX + Math.cos(theta) * r;
+      const y = ARENA_CY + Math.sin(theta) * r;
+      const m = new Marble(country, x, y);
+      m.vx = (Math.random() - 0.5) * 4;
+      m.vy = (Math.random() - 0.5) * 4;
+      marbles.push(m);
+    });
+
+    camera.y = 0;
+    camera.targetY = 0;
+    camera.leadMarble = marbles[0];
+  } else if (currentGameMode === 'circle_survivor') {
     // CIRCLE SURVIVOR: Spawn in rotating arena
     const total = targetCountries.length;
     const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
@@ -755,10 +857,116 @@ function handleCircleSurvivorPhysics() {
       // If isGap: marble glides through into space and triggers elimination!
     }
   }
+// Concentric Rings Maze Physics (Multi-Layer Ring Maze)
+function handleConcentricRingsPhysics() {
+  // Update rotating ring barrier angles
+  CONCENTRIC_RINGS.forEach(r => {
+    r.angle += r.speed;
+  });
+
+  // Spatial Marble-Marble Collisions
+  marbles.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < marbles.length; i++) {
+    const m1 = marbles[i];
+    if (m1.finished) continue;
+
+    for (let j = i + 1; j < marbles.length; j++) {
+      const m2 = marbles[j];
+      if (m2.finished) continue;
+      if (m2.y - m1.y > m1.radius + m2.radius) break;
+
+      const dx = m2.x - m1.x;
+      const dy = m2.y - m1.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = m1.radius + m2.radius;
+
+      if (dist < minDist && dist > 0) {
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        m1.x -= nx * overlap * 0.5;
+        m1.y -= ny * overlap * 0.5;
+        m2.x += nx * overlap * 0.5;
+        m2.y += ny * overlap * 0.5;
+
+        const kx = m1.vx - m2.vx;
+        const ky = m1.vy - m2.vy;
+        const p = 2 * (nx * kx + ny * ky) / (m1.mass + m2.mass);
+
+        m1.vx -= p * m2.mass * nx;
+        m1.vy -= p * m2.mass * ny;
+        m2.vx += p * m1.mass * nx;
+        m2.vy += p * m1.mass * ny;
+
+        if (Math.hypot(kx, ky) > 3) {
+          sfx.playMarbleClink(0.3);
+        }
+      }
+    }
+
+    // Outer perimeter constraint (keeps marbles inside the maze boundaries)
+    const distFromCenter = Math.hypot(m1.x - ARENA_CX, m1.y - ARENA_CY);
+    const outerBoundary = 472;
+    if (distFromCenter + m1.radius > outerBoundary && distFromCenter > 0) {
+      const nx = (m1.x - ARENA_CX) / distFromCenter;
+      const ny = (m1.y - ARENA_CY) / distFromCenter;
+      m1.x = ARENA_CX + nx * (outerBoundary - m1.radius);
+      m1.y = ARENA_CY + ny * (outerBoundary - m1.radius);
+      const dot = m1.vx * nx + m1.vy * ny;
+      if (dot > 0) {
+        m1.vx -= 1.8 * dot * nx;
+        m1.vy -= 1.8 * dot * ny;
+        sfx.playMarbleClink(0.35);
+      }
+    }
+
+    // Marble vs Concentric Rings Barriers
+    CONCENTRIC_RINGS.forEach(ring => {
+      const rDist = Math.abs(distFromCenter - ring.radius);
+      if (rDist < m1.radius + 6) {
+        let ang = Math.atan2(m1.y - ARENA_CY, m1.x - ARENA_CX) - ring.angle;
+        ang = (ang % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+
+        const sector = (Math.PI * 2) / ring.numGaps;
+        const pos = ang % sector;
+        const isGap = pos >= (sector - ring.gapArc);
+
+        if (!isGap) {
+          // Solid ring barrier collision
+          const nx = (m1.x - ARENA_CX) / distFromCenter;
+          const ny = (m1.y - ARENA_CY) / distFromCenter;
+
+          if (distFromCenter > ring.radius) {
+            m1.x = ARENA_CX + nx * (ring.radius + m1.radius + 1);
+            m1.y = ARENA_CY + ny * (ring.radius + m1.radius + 1);
+          } else {
+            m1.x = ARENA_CX + nx * (ring.radius - m1.radius - 1);
+            m1.y = ARENA_CY + ny * (ring.radius - m1.radius - 1);
+          }
+
+          const tanVx = -ny * ring.speed * ring.radius;
+          const tanVy = nx * ring.speed * ring.radius;
+
+          const dot = m1.vx * nx + m1.vy * ny;
+          if ((dot > 0 && distFromCenter < ring.radius) || (dot < 0 && distFromCenter > ring.radius)) {
+            m1.vx = (m1.vx - 1.85 * dot * nx) + tanVx * 0.35;
+            m1.vy = (m1.vy - 1.85 * dot * ny) + tanVy * 0.35;
+            sfx.playMarbleClink(0.35);
+          }
+        }
+        // If isGap, marble glides freely through the door into the next tier!
+      }
+    });
+  }
 }
 
 // Physics & Collision Handling
 function handlePhysics() {
+  if (currentGameMode === 'concentric_rings') {
+    handleConcentricRingsPhysics();
+    return;
+  }
   if (currentGameMode === 'circle_survivor') {
     handleCircleSurvivorPhysics();
     return;
@@ -931,21 +1139,21 @@ function handlePhysics() {
 
 // Track Leader & Update Action Camera
 function updateCamera() {
-  if (currentGameMode === 'circle_survivor') {
+  if (currentGameMode === 'circle_survivor' || currentGameMode === 'concentric_rings') {
     camera.targetY = 0;
     camera.y = 0;
 
-    // In circle survivor, lead is the marble closest to center or surviving
-    const alive = marbles.filter(m => !m.finished);
-    if (alive.length > 0) {
-      alive.sort((a, b) => {
+    // In circular arenas, lead is the marble closest to the center core
+    const active = marbles.filter(m => !m.finished);
+    if (active.length > 0) {
+      active.sort((a, b) => {
         const da = Math.hypot(a.x - ARENA_CX, a.y - ARENA_CY);
         const db = Math.hypot(b.x - ARENA_CX, b.y - ARENA_CY);
         return da - db;
       });
-      camera.leadMarble = alive[0];
+      camera.leadMarble = active[0];
     } else {
-      camera.leadMarble = finishedMarbles[finishedMarbles.length - 1] || null;
+      camera.leadMarble = finishedMarbles[0] || null;
     }
     return;
   }
@@ -1018,9 +1226,10 @@ function showWinnerBanner(winner) {
 
   flagImg.src = getFlagUrl(winner.code);
   nameElem.innerText = winner.name;
-  statsElem.innerText = (currentGameMode === 'circle_survivor')
-    ? `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`
-    : `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
+  let stats = `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
+  if (currentGameMode === 'circle_survivor') stats = `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`;
+  if (currentGameMode === 'concentric_rings') stats = `🏆 FIRST NATION TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
+  statsElem.innerText = stats;
   overlay.classList.add('active');
 }
 
@@ -1170,8 +1379,121 @@ function drawCircleSurvivorArena(ctx) {
   ctx.restore();
 }
 
+// Render Concentric Rings Multi-Layer Maze
+function drawConcentricRingsMaze(ctx) {
+  ctx.save();
+
+  // Dark deep-space arena floor
+  const floorGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 20, ARENA_CX, ARENA_CY, 475);
+  floorGrad.addColorStop(0, '#0c1222');
+  floorGrad.addColorStop(0.7, '#070a14');
+  floorGrad.addColorStop(1, '#02040a');
+  ctx.fillStyle = floorGrad;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 470, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Arena radar grid rings
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+  ctx.lineWidth = 2;
+  [80, 180, 290, 400].forEach(r => {
+    ctx.beginPath();
+    ctx.arc(ARENA_CX, ARENA_CY, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Cross hair lines
+  ctx.beginPath();
+  ctx.moveTo(ARENA_CX - 460, ARENA_CY);
+  ctx.lineTo(ARENA_CX + 460, ARENA_CY);
+  ctx.moveTo(ARENA_CX, ARENA_CY - 460);
+  ctx.lineTo(ARENA_CX, ARENA_CY + 460);
+  ctx.stroke();
+
+  // Outer rim boundary (contains outer channel)
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 470, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Concentric Spinning Ring Barriers
+  CONCENTRIC_RINGS.forEach(ring => {
+    const sector = (Math.PI * 2) / ring.numGaps;
+
+    for (let g = 0; g < ring.numGaps; g++) {
+      const startArc = ring.angle + g * sector;
+      const endArc = startArc + (sector - ring.gapArc);
+
+      // Glowing Neon Ring Segment
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ARENA_CX, ARENA_CY, ring.radius, startArc, endArc);
+      ctx.lineWidth = 20;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = ring.color;
+      ctx.shadowColor = ring.glow;
+      ctx.shadowBlur = 22;
+      ctx.stroke();
+
+      // Inner Bright Line
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.restore();
+
+      // Gate Indicator in the gap
+      const gapMid = endArc + ring.gapArc * 0.5;
+      const gx = ARENA_CX + Math.cos(gapMid) * ring.radius;
+      const gy = ARENA_CY + Math.sin(gapMid) * ring.radius;
+
+      ctx.save();
+      ctx.translate(gx, gy);
+      ctx.rotate(gapMid + Math.PI / 2);
+      ctx.fillStyle = '#10b981';
+      ctx.shadowColor = '#059669';
+      ctx.shadowBlur = 10;
+      ctx.font = 'bold 15px Montserrat, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('▼ DOOR ▼', 0, 0);
+      ctx.restore();
+    }
+  });
+
+  // Center Trophy Core (The Golden Goal!)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, CORE_RADIUS, 0, Math.PI * 2);
+  const coreGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 4, ARENA_CX, ARENA_CY, CORE_RADIUS);
+  coreGrad.addColorStop(0, '#fde047');
+  coreGrad.addColorStop(0.6, '#f59e0b');
+  coreGrad.addColorStop(1, '#ea580c');
+  ctx.fillStyle = coreGrad;
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 35;
+  ctx.fill();
+
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  // Floating Trophy icon in Core
+  ctx.font = '36px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🏆', ARENA_CX, ARENA_CY);
+  ctx.restore();
+
+  ctx.restore();
+}
+
 // Render Track & Environment
 function drawTrackEnvironment(ctx) {
+  if (currentGameMode === 'concentric_rings') {
+    drawConcentricRingsMaze(ctx);
+    return;
+  }
   if (currentGameMode === 'circle_survivor') {
     drawCircleSurvivorArena(ctx);
     return;
@@ -1434,19 +1756,30 @@ function drawShortsHUD() {
   ctx.textAlign = 'center';
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 15;
-  const isCircle = currentGameMode === 'circle_survivor';
-  const regionTitle = isCircle
-    ? (selectedContinent === 'All' ? "CIRCLE SURVIVOR: BATTLE ROYALE" : `${selectedContinent.toUpperCase()} CIRCLE SURVIVOR`)
-    : ((selectedContinent === 'All') ? "COUNTRY MARBLE RACE" : `${selectedContinent.toUpperCase()} MARBLE RACE`);
+  let regionTitle = "COUNTRY MARBLE RACE";
+  if (currentGameMode === 'circle_survivor') {
+    regionTitle = (selectedContinent === 'All' ? "CIRCLE SURVIVOR: BATTLE ROYALE" : `${selectedContinent.toUpperCase()} CIRCLE SURVIVOR`);
+  } else if (currentGameMode === 'concentric_rings') {
+    regionTitle = (selectedContinent === 'All' ? "CONCENTRIC RING MAZE" : `${selectedContinent.toUpperCase()} RING MAZE`);
+  } else {
+    regionTitle = (selectedContinent === 'All' ? "COUNTRY MARBLE RACE" : `${selectedContinent.toUpperCase()} MARBLE RACE`);
+  }
   ctx.fillText(regionTitle, V_WIDTH / 2, 65);
 
   ctx.font = '700 20px Inter, sans-serif';
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
   const aliveCount = marbles.filter(m => !m.finished).length;
-  const countLabel = isCircle ? `${aliveCount} SURVIVORS REMAINING` : ((selectedContinent === 'All') ? "197 NATIONS" : `${marbles.length} NATIONS`);
+  let countLabel = `${marbles.length} NATIONS`;
+  if (currentGameMode === 'circle_survivor') {
+    countLabel = `${aliveCount} SURVIVORS REMAINING`;
+  } else if (currentGameMode === 'concentric_rings') {
+    countLabel = `1ST TO REACH THE CORE WINS`;
+  } else {
+    countLabel = (selectedContinent === 'All') ? "197 NATIONS" : `${marbles.length} NATIONS`;
+  }
   const diffBadge = (currentDifficulty === 'Easy') ? "🟢 EASY" : ((currentDifficulty === 'Hard') ? "🔴 HARD" : "🟡 NORMAL");
-  ctx.fillText(`${countLabel} • ${diffBadge} • ${isCircle ? 'WHO SURVIVES?' : 'WHO WINS?'}`, V_WIDTH / 2, 105);
+  ctx.fillText(`${countLabel} • ${diffBadge}`, V_WIDTH / 2, 105);
 
   // Leader Indicator at the top
   if (camera.leadMarble) {
@@ -1461,7 +1794,9 @@ function drawShortsHUD() {
     ctx.font = '800 20px Inter, sans-serif';
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'center';
-    const leaderLabel = isCircle ? `🛡️ LAST STAND: ${camera.leadMarble.name}` : `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
+    let leaderLabel = `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
+    if (currentGameMode === 'circle_survivor') leaderLabel = `🛡️ LAST STAND: ${camera.leadMarble.name}`;
+    if (currentGameMode === 'concentric_rings') leaderLabel = `🎯 CLOSEST TO CORE: ${camera.leadMarble.name}`;
     ctx.fillText(leaderLabel, V_WIDTH / 2, 186);
   }
 
@@ -1517,7 +1852,9 @@ function drawCanvasWinnerOverlay() {
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 25;
   ctx.textAlign = 'center';
-  const championTitle = (currentGameMode === 'circle_survivor') ? '🏆 LAST SURVIVOR CHAMPION! 🏆' : '🏆 1ST PLACE CHAMPION! 🏆';
+  let championTitle = '🏆 1ST PLACE CHAMPION! 🏆';
+  if (currentGameMode === 'circle_survivor') championTitle = '🏆 LAST SURVIVOR CHAMPION! 🏆';
+  if (currentGameMode === 'concentric_rings') championTitle = '🏆 RING MAZE CHAMPION! 🏆';
   ctx.fillText(championTitle, V_WIDTH / 2, centerY - 230);
 
   // Giant Flag Texture (280x280 circular flag medal)
@@ -1562,9 +1899,9 @@ function drawCanvasWinnerOverlay() {
   ctx.font = '800 28px Inter, sans-serif';
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
-  const winSubtitle = (currentGameMode === 'circle_survivor')
-    ? `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`
-    : `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
+  let winSubtitle = `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
+  if (currentGameMode === 'circle_survivor') winSubtitle = `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`;
+  if (currentGameMode === 'concentric_rings') winSubtitle = `🥇 FIRST TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
   ctx.fillText(winSubtitle, V_WIDTH / 2, centerY + 260);
 
   // YouTube Shorts Engagement Callout
@@ -1575,7 +1912,7 @@ function drawCanvasWinnerOverlay() {
   ctx.restore();
 }
 
-// Game Mode Selection Buttons (Downhill Race vs Circle Survivor)
+// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings)
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -1590,7 +1927,13 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       isPaused = false;
       const startBtn = document.getElementById('startBtn');
       if (startBtn) {
-        startBtn.innerText = currentGameMode === 'circle_survivor' ? '▶️ Drop Into Ring & Auto-Record' : '▶️ Drop Start Gate & Auto-Record';
+        if (currentGameMode === 'concentric_rings') {
+          startBtn.innerText = '▶️ Start Ring Maze & Auto-Record';
+        } else if (currentGameMode === 'circle_survivor') {
+          startBtn.innerText = '▶️ Drop Into Ring & Auto-Record';
+        } else {
+          startBtn.innerText = '▶️ Drop Start Gate & Auto-Record';
+        }
       }
       initRace();
     }
@@ -1624,7 +1967,9 @@ document.getElementById('startBtn').addEventListener('click', () => {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record';
+    document.getElementById('startBtn').innerText = currentGameMode === 'concentric_rings' 
+      ? '🔄 Restart Maze & Record' 
+      : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record');
     document.getElementById('pauseBtn').disabled = false;
 
     // 1-Click Auto-Record
@@ -1868,25 +2213,37 @@ function stopRecording() {
 let currentWinner = null;
 
 const VIRAL_TITLE_TEMPLATES = [
-  (ctx) => ctx.isCircle
-    ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
-    : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`,
-  (ctx) => ctx.isCircle
-    ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
-    : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`,
-  (ctx) => ctx.isCircle
-    ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
-    : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`,
-  (ctx) => ctx.isCircle
-    ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
-    : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`,
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
+    : (ctx.mode === 'circle_survivor'
+      ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
+      : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`),
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
+    : (ctx.mode === 'circle_survivor'
+      ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
+      : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`),
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
+    : (ctx.mode === 'circle_survivor'
+      ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
+      : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`),
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
+    : (ctx.mode === 'circle_survivor'
+      ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
+      : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`),
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
-  (ctx) => ctx.isCircle
-    ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
-    : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`,
-  (ctx) => ctx.isCircle
-    ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-    : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`,
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
+    : (ctx.mode === 'circle_survivor'
+      ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
+      : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`),
+  (ctx) => ctx.mode === 'concentric_rings'
+    ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+    : (ctx.mode === 'circle_survivor'
+      ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+      : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`),
   (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`
 ];
 
@@ -1911,6 +2268,7 @@ function generateShortsTitles(winner = null) {
   const winnerHighlight = winner ? `${winner.name.toUpperCase()} SHOCKED EVERYONE` : `YOU WON'T BELIEVE WHO WON`;
 
   const context = {
+    mode: currentGameMode,
     isCircle: currentGameMode === 'circle_survivor',
     regionName,
     winnerName,
@@ -1954,19 +2312,28 @@ function updateVideoTitles(winner = null) {
   });
 
   // Update Description & Tags
-  const isCircle = currentGameMode === 'circle_survivor';
   const region = selectedContinent === "All" ? "All World (197 Nations)" : `${selectedContinent} (${currentGeneratedTitles.length > 0 ? currentGeneratedTitles[0].match(/(\d+)\s+Countries|\s+(\d+)\s+Nations/)?.[1] || 49 : 49} Flags)`;
-  const winText = winner 
-    ? (isCircle ? `🥇 Last Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}`)
-    : (isCircle ? `Who will survive the spinning ring hazards?` : `Who will survive the 8 brutal obstacle stages?`);
-  const modeTitle = isCircle ? "Circle Survivor Battle Royale Simulator" : "Downhill Marble Race Simulator";
+  let winText = `Who will reach the finish line?`;
+  let modeTitle = "Downhill Marble Race Simulator";
+
+  if (currentGameMode === 'circle_survivor') {
+    modeTitle = "Circle Survivor Battle Royale Simulator";
+    winText = winner ? `🥇 Last Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the spinning ring hazards?`;
+  } else if (currentGameMode === 'concentric_rings') {
+    modeTitle = "Concentric Rotating Rings Maze Simulator";
+    winText = winner ? `🥇 Golden Core Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will penetrate all 4 spinning barrier doors and claim the Golden Core?`;
+  } else {
+    modeTitle = "Downhill Marble Race Simulator";
+    winText = winner ? `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the 8 brutal obstacle stages?`;
+  }
+
   const desc = `🏆 ${region} ${modeTitle}!
 ${winText}
 Difficulty: ${currentDifficulty} Preset
 
 Comment your country flag below! 👇
 
-#shorts #marblerace #flagsbattle #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral`;
+#shorts #marblerace #flagsbattle #ringmaze #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral`;
 
   const tagsBox = document.getElementById('videoTagsBox');
   if (tagsBox) tagsBox.value = desc;
