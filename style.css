@@ -695,6 +695,7 @@ body {
 .loader-screen.loaded {
   opacity: 0;
   pointer-events: none;
+  display: none !important;
 }
 
 .progress-bar-bg {

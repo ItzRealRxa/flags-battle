@@ -71,7 +71,20 @@ const flagImages = {};
 
 function preloadFlags(onProgress, onComplete) {
   let loaded = 0;
+  let finished = false;
   const total = COUNTRIES_DATA.length;
+
+  const finishLoading = () => {
+    if (!finished) {
+      finished = true;
+      onComplete();
+    }
+  };
+
+  // Fail-safe timeout: never leave user stuck on loader screen!
+  setTimeout(() => {
+    finishLoading();
+  }, 2000);
 
   COUNTRIES_DATA.forEach(country => {
     const img = new Image();
@@ -81,13 +94,13 @@ function preloadFlags(onProgress, onComplete) {
       loaded++;
       flagImages[country.code] = img;
       onProgress(loaded, total);
-      if (loaded === total) onComplete();
+      if (loaded >= total) finishLoading();
     };
     img.onerror = () => {
       loaded++;
       flagImages[country.code] = null;
       onProgress(loaded, total);
-      if (loaded === total) onComplete();
+      if (loaded >= total) finishLoading();
     };
   });
 }
@@ -857,6 +870,8 @@ function handleCircleSurvivorPhysics() {
       // If isGap: marble glides through into space and triggers elimination!
     }
   }
+}
+
 // Concentric Rings Maze Physics (Multi-Layer Ring Maze)
 function handleConcentricRingsPhysics() {
   // Update rotating ring barrier angles
@@ -2408,14 +2423,18 @@ document.getElementById('copyTagsBtn')?.addEventListener('click', (e) => {
 // Preload & Start
 const loader = document.getElementById('loader');
 const loadProgress = document.getElementById('loadProgress');
+let gameLoopStarted = false;
 
 preloadFlags(
   (loaded, total) => {
-    loadProgress.style.width = `${(loaded / total) * 100}%`;
+    if (loadProgress) loadProgress.style.width = `${(loaded / total) * 100}%`;
   },
   () => {
-    loader.classList.add('loaded');
+    if (loader) loader.classList.add('loaded');
     initRace();
-    requestAnimationFrame(gameLoop);
+    if (!gameLoopStarted) {
+      gameLoopStarted = true;
+      requestAnimationFrame(gameLoop);
+    }
   }
 );
