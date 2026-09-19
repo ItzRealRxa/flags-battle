@@ -2817,6 +2817,7 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
           : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`))),
+
   (ctx) => ctx.mode === 'black_hole'
     ? `😱 ${ctx.winnerHighlight} Escaped The Event Horizon In The ${ctx.regionName} Black Hole! 🌪️ #flagsbattle`
     : (ctx.mode === 'bomb_tag'
@@ -2826,6 +2827,7 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
           : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`))),
+
   (ctx) => ctx.mode === 'black_hole'
     ? `⚡ Extreme ${ctx.diff} Black Hole: ${ctx.count} Nations Trapped In Cosmic Orbit Before Singularity! 🪐 #shorts`
     : (ctx.mode === 'bomb_tag'
@@ -2835,6 +2837,7 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
           : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`))),
+
   (ctx) => ctx.mode === 'black_hole'
     ? `🥇 ${ctx.winnerName} BECOMES THE ONLY COUNTRY TO SURVIVE THE BLACK HOLE! (${ctx.regionName}) 🏆 #marblerace`
     : (ctx.mode === 'bomb_tag'
@@ -2844,7 +2847,9 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
           : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`))),
+
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
+
   (ctx) => ctx.mode === 'black_hole'
     ? `🌌 CAN YOUR COUNTRY ESCAPE THE EVENT HORIZON?! 🪐 #blackhole #shorts`
     : (ctx.mode === 'bomb_tag'
@@ -2854,6 +2859,7 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
           : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`))),
+
   (ctx) => ctx.mode === 'black_hole'
     ? `🏆 The Most Hypnotic Black Hole Marble Vortex You've Ever Seen! (${ctx.regionName}) 🌪️ #shorts`
     : (ctx.mode === 'bomb_tag'
@@ -2863,7 +2869,33 @@ const VIRAL_TITLE_TEMPLATES = [
         : (ctx.mode === 'circle_survivor'
           ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
           : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`))),
-  (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`
+
+  (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`,
+
+  // New High-Performing Viral Formulas
+  (ctx) => `🔔 IF YOUR COUNTRY LOSES, YOU MUST SUBSCRIBE! 🚩 (${ctx.count} Nations Battle) #shorts #challenge`,
+
+  (ctx) => `👑 Which Country Has The Best Luck? (${ctx.regionName} Tournament) 🌟 #flags #gaming`,
+
+  (ctx) => ctx.mode === 'black_hole'
+    ? `🕳️ 196 Countries Enter The Singularity... ONLY 1 RETURNS! 🚀 #shorts #space`
+    : (ctx.mode === 'bomb_tag'
+      ? `🧨 Ticking Time Bomb vs 196 Nations: Most Intense Game of Tag Ever! 💣 #shorts`
+      : (ctx.mode === 'concentric_rings'
+        ? `🚪 4 Revolving Maze Doors vs 196 Countries: Can Anyone Escape? 🌀 #shorts`
+        : (ctx.mode === 'circle_survivor'
+          ? `⚔️ 196 Countries In The Death Ring: Last Marble Standing Wins! 🛡️ #shorts`
+          : `🏃‍♂️ 196 Countries Race Through 8 Impossible Obstacles! 💥 #shorts`))),
+
+  (ctx) => `⚠️ WARNING: This ${ctx.regionName} Marble Battle Is Extremely Addictive! 🏁 #satisfying #shorts`,
+
+  (ctx) => `🔥 Guess The Winner Before It Ends! (${ctx.regionName} Edition) 🏆 #trivia #flags`,
+
+  (ctx) => `📈 Probability Simulation: Who Actually Wins Out of ${ctx.count} Countries? 🤖 #shorts #marblerace`,
+
+  (ctx) => `👀 Watch How ${ctx.winnerName} Pulled Off The Most Clutch Comeback in History! 🏅 #shorts`,
+
+  (ctx) => `💥 99% Of People Guess The Wrong Country! Did Yours Survive? 🌍 #shorts #geography`
 ];
 
 function getFlagEmoji(code) {
@@ -2898,7 +2930,7 @@ function generateShortsTitles(winner = null) {
   };
 
   const shuffled = [...VIRAL_TITLE_TEMPLATES].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 4).map(fn => fn(context));
+  return shuffled.slice(0, 8).map(fn => fn(context)); // Now returns 8 choices!
 }
 
 let currentGeneratedTitles = [];
@@ -2930,35 +2962,49 @@ function updateVideoTitles(winner = null) {
     });
   });
 
-  // Update Description & Tags
+  // Update Rich Description & Tags
   const region = selectedContinent === "All" ? "All World (197 Nations)" : `${selectedContinent} (${currentGeneratedTitles.length > 0 ? currentGeneratedTitles[0].match(/(\d+)\s+Countries|\s+(\d+)\s+Nations/)?.[1] || 49 : 49} Flags)`;
   let winText = `Who will reach the finish line?`;
   let modeTitle = "Downhill Marble Race Simulator";
+  let modeRules = "8 brutal physical obstacle stages downhill.";
 
   if (currentGameMode === 'black_hole') {
     modeTitle = "Black Hole Cosmic Vortex Simulator";
+    modeRules = "Escalating gravitational singularity! Orbiting nations bounce and get spaghettified into the void. Only the last survivor escapes.";
     winText = winner ? `🥇 Singularity Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will escape the cosmic event horizon?`;
   } else if (currentGameMode === 'bomb_tag') {
     modeTitle = "Bomb Tag Hot Potato Simulator";
+    modeRules = "Ticking TNT detonates every 4.5s! Marbles pass the bomb on collision. Exploded marbles vanish until 1 champion remains.";
     winText = winner ? `🥇 Hot Potato Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will pass the ticking bomb before detonation?`;
   } else if (currentGameMode === 'circle_survivor') {
     modeTitle = "Circle Survivor Battle Royale Simulator";
+    modeRules = "High-speed spinning arena with counter-rotating hazard gaps. Marbles knocked outside the perimeter are eliminated!";
     winText = winner ? `🥇 Last Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the spinning ring hazards?`;
   } else if (currentGameMode === 'concentric_rings') {
     modeTitle = "Concentric Rotating Rings Maze Simulator";
+    modeRules = "4 counter-rotating orbital maze barrier tiers! First country to find all 4 revolving gates and touch the Golden Core wins!";
     winText = winner ? `🥇 Golden Core Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will penetrate all 4 spinning barrier doors and claim the Golden Core?`;
   } else {
     modeTitle = "Downhill Marble Race Simulator";
+    modeRules = "High-speed obstacle course featuring pinball pegs, spinning blades, moving hammers, and spring rebounders!";
     winText = winner ? `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the 8 brutal obstacle stages?`;
   }
 
   const desc = `🏆 ${region} ${modeTitle}!
 ${winText}
-Difficulty: ${currentDifficulty} Preset
 
-Comment your country flag below! 👇
+🎮 GAME MODE RULES:
+${modeRules}
+⚙️ DIFFICULTY: ${currentDifficulty} Preset
 
-#shorts #marblerace #flagsbattle #ringmaze #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral`;
+👇 COMMENT YOUR COUNTRY FLAG TO SUPPORT THEM!
+🔔 SUBSCRIBE if your country lost the battle!
+
+📌 COPY THIS FOR PINNED COMMENT:
+"Which country should I root for in the next race? Drop your flags below! 🚩👇"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#shorts #marblerace #flagsbattle #blackhole #bombtag #ringmaze #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral #tiktok #reels #satisfying #fyp #foryou #entertainment #trending`;
 
   const tagsBox = document.getElementById('videoTagsBox');
   if (tagsBox) tagsBox.value = desc;
