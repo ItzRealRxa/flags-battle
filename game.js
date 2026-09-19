@@ -1133,12 +1133,25 @@ function startRecording() {
   try {
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 800;
     const fps = isMobile ? 30 : 60; // 30fps ensures mobile GPU encoder doesn't drop frames or fail
-    const stream = canvas.captureStream ? canvas.captureStream(fps) : null;
+    const canvasStream = canvas.captureStream ? canvas.captureStream(fps) : null;
     recordedChunks = [];
+
+    // Capture sound from Web Audio synthesizer!
+    sfx.init();
+    const audioStream = sfx.getMediaStream();
+
+    // Composite stream containing both 1080x1920 video and synchronized audio!
+    const combinedStream = new MediaStream();
+    if (canvasStream) {
+      canvasStream.getVideoTracks().forEach(t => combinedStream.addTrack(t));
+    }
+    if (audioStream) {
+      audioStream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+    }
 
     const chosenMime = getSupportedMimeType();
     const options = chosenMime ? { mimeType: chosenMime } : {};
-    mediaRecorder = new MediaRecorder(stream, options);
+    mediaRecorder = new MediaRecorder(combinedStream, options);
     
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) recordedChunks.push(e.data);
@@ -1161,10 +1174,12 @@ function startRecording() {
       currentVideoUrl = URL.createObjectURL(currentVideoBlob);
       currentVideoFilename = `Country_Marble_Race_${selectedContinent}_${Date.now()}.${ext}`;
 
-      // Update in-page video player
+      // Update in-page video player with unmuted audio
       const player = document.getElementById('videoPreviewPlayer');
       if (player) {
         player.src = currentVideoUrl;
+        player.muted = false;
+        player.volume = 1.0;
         player.load();
         player.play().catch(() => {});
       }
