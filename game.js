@@ -1301,21 +1301,37 @@ function generateShortsTitles(winner = null) {
   return shuffled.slice(0, 4).map(fn => fn(context));
 }
 
+let currentGeneratedTitles = [];
+
 function updateVideoTitles(winner = null) {
   currentWinner = winner;
-  const titles = generateShortsTitles(winner);
+  currentGeneratedTitles = generateShortsTitles(winner);
   const container = document.getElementById('titleList');
   if (!container) return;
 
-  container.innerHTML = titles.map(title => `
-    <div class="title-item" onclick="copyTitleText(this, '${escapeHtml(title).replace(/'/g, "\\'")}')">
+  container.innerHTML = currentGeneratedTitles.map((title, idx) => `
+    <div class="title-item" data-idx="${idx}">
       <div class="title-text">${escapeHtml(title)}</div>
-      <button class="copy-btn" onclick="event.stopPropagation(); copyTitleText(this.parentElement, '${escapeHtml(title).replace(/'/g, "\\'")}')">📋 Copy</button>
+      <button class="copy-btn" data-idx="${idx}">📋 Copy</button>
     </div>
   `).join('');
 
+  // Attach touch and click listeners cleanly (prevents inline string quote errors on mobile)
+  container.querySelectorAll('.title-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const idx = parseInt(item.getAttribute('data-idx'), 10);
+      const titleToCopy = currentGeneratedTitles[idx];
+      const btn = item.querySelector('.copy-btn');
+      if (titleToCopy) {
+        copyToClipboardUniversal(titleToCopy).then(() => {
+          triggerCopySuccessUI(btn);
+        });
+      }
+    });
+  });
+
   // Update Description & Tags
-  const region = selectedContinent === "All" ? "All World (197 Nations)" : `${selectedContinent} (${titles.length > 0 ? titles[0].match(/(\d+)\s+Countries|\s+(\d+)\s+Nations/)?.[1] || 49 : 49} Flags)`;
+  const region = selectedContinent === "All" ? "All World (197 Nations)" : `${selectedContinent} (${currentGeneratedTitles.length > 0 ? currentGeneratedTitles[0].match(/(\d+)\s+Countries|\s+(\d+)\s+Nations/)?.[1] || 49 : 49} Flags)`;
   const winText = winner ? `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the 8 brutal obstacle stages?`;
   const desc = `🏆 ${region} Downhill Marble Race Simulator!
 ${winText}
@@ -1329,44 +1345,70 @@ Comment your country flag below! 👇
   if (tagsBox) tagsBox.value = desc;
 }
 
-window.copyTitleText = function(itemElem, text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = itemElem.querySelector('.copy-btn');
-      if (btn) {
-        btn.innerText = '✅ Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-          btn.innerText = '📋 Copy';
-          btn.classList.remove('copied');
-        }, 1800);
-      }
-    }).catch(() => {
-      prompt("Copy title:", text);
-    });
-  } else {
-    prompt("Copy title:", text);
+// Universal Clipboard Copy (iOS Safari, Android, Chrome, HTTP & HTTPS)
+function copyToClipboardUniversal(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
   }
-};
+  return fallbackCopy(text);
+}
+
+function fallbackCopy(text) {
+  return new Promise((resolve) => {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.top = '-9999px';
+    el.style.left = '-9999px';
+    el.style.fontSize = '16px'; // Prevents iOS zooming on focus
+    document.body.appendChild(el);
+
+    const isIOS = /ipad|iphone|ipod/i.test(navigator.userAgent);
+    if (isIOS) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      el.setSelectionRange(0, 999999);
+    } else {
+      el.select();
+    }
+
+    try {
+      document.execCommand('copy');
+    } catch (err) {
+      console.warn('execCommand copy fallback error:', err);
+    }
+    document.body.removeChild(el);
+    resolve();
+  });
+}
+
+function triggerCopySuccessUI(btn) {
+  if (!btn) return;
+  const orig = btn.innerText;
+  btn.innerText = '✅ Copied!';
+  btn.classList.add('copied');
+  setTimeout(() => {
+    btn.innerText = orig;
+    btn.classList.remove('copied');
+  }, 1800);
+}
 
 document.getElementById('refreshTitlesBtn')?.addEventListener('click', () => {
   updateVideoTitles(currentWinner);
 });
 
-document.getElementById('copyTagsBtn')?.addEventListener('click', () => {
+document.getElementById('copyTagsBtn')?.addEventListener('click', (e) => {
   const box = document.getElementById('videoTagsBox');
   if (!box) return;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(box.value).then(() => {
-      const btn = document.getElementById('copyTagsBtn');
-      btn.innerText = '✅ Copied!';
-      setTimeout(() => {
-        btn.innerText = '📋 Copy Description';
-      }, 1800);
-    });
-  } else {
-    prompt("Copy tags:", box.value);
-  }
+  copyToClipboardUniversal(box.value).then(() => {
+    triggerCopySuccessUI(e.target);
+  });
 });
 
 // Preload & Start
