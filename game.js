@@ -105,19 +105,14 @@ class Marble {
   update() {
     if (this.finished) {
       if (currentGameMode === 'circle_survivor') {
-        // Fall down out of view when eliminated from circle
-        this.vy += 0.25;
-        this.vx *= 0.98;
-        this.vy *= 0.98;
-        this.x += this.vx;
-        this.y += this.vy;
-      } else {
-        // Gentle slide in podium area
-        this.vx *= 0.92;
-        this.vy *= 0.92;
-        this.x += this.vx;
-        this.y += this.vy;
+        // Eliminated marbles disappear completely from the arena
+        return;
       }
+      // Downhill Race: Gentle slide in podium area
+      this.vx *= 0.92;
+      this.vy *= 0.92;
+      this.x += this.vx;
+      this.y += this.vy;
       return;
     }
 
@@ -153,15 +148,15 @@ class Marble {
         this.trail.pop();
       }
 
-      // Check if knocked out of arena through gaps
+      // Check if knocked out of arena through gaps - DISAPPEAR IMMEDIATELY!
       const distFromCenter = Math.hypot(this.x - ARENA_CX, this.y - ARENA_CY);
-      if (distFromCenter > ARENA_RADIUS + 75 && !this.finished) {
+      if (distFromCenter > ARENA_RADIUS + 18 && !this.finished) {
         this.finished = true;
         finishedMarbles.push(this);
         const aliveSurvivors = marbles.filter(m => !m.finished);
         this.finishRank = aliveSurvivors.length + 1; // e.g., 2nd eliminated, etc.
         sfx.playMarbleClink(0.8);
-        createCelebration(this.x, this.y);
+        createCelebration(this.x, this.y); // Poof sparks
 
         addFeedItem(`💀 #${this.finishRank} Eliminated: ${this.name}`, '#f43f5e');
 
@@ -255,6 +250,11 @@ class Marble {
   }
 
   draw(ctx) {
+    // In Circle Survivor mode, eliminated marbles disappear completely from the screen
+    if (currentGameMode === 'circle_survivor' && this.finished && this !== winnerMarble) {
+      return;
+    }
+
     // Draw Speed Trail
     for (let i = 0; i < this.trail.length; i++) {
       const tr = this.trail[i];
