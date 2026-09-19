@@ -57,6 +57,13 @@ const CONCENTRIC_RINGS = [
 ];
 const CORE_RADIUS = 50;
 
+// Bomb Tag / Hot Potato Specs
+let bombCarrier = null;
+let bombTimer = 4.5;
+const BOMB_ROUND_DURATION = 4.5;
+let bombTransferCooldown = 0;
+let bombAuraAnim = 0;
+
 // Track Obstacles
 let walls = [];
 let pegs = [];
@@ -126,7 +133,7 @@ class Marble {
 
   update() {
     if (this.finished) {
-      if (currentGameMode === 'circle_survivor') {
+      if (currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag') {
         // Eliminated marbles disappear completely from the arena
         return;
       }
@@ -149,6 +156,45 @@ class Marble {
     if (this.bouncePulse > 0) this.bouncePulse -= 0.05;
 
     // Mode-specific Movement & Boundaries
+    if (currentGameMode === 'bomb_tag') {
+      if (this === bombCarrier) {
+        // Carrier moves slightly faster seeking collisions to pass the bomb!
+        this.vx *= 1.008;
+        this.vy *= 1.008;
+        const spd = Math.hypot(this.vx, this.vy);
+        if (spd > 11) {
+          this.vx = (this.vx / spd) * 11;
+          this.vy = (this.vy / spd) * 11;
+        }
+        if (Math.random() < 0.4) {
+          particles.push(new Particle(this.x, this.y, Math.random() < 0.5 ? '#f59e0b' : '#ef4444', 4));
+        }
+      } else {
+        this.vx *= 0.993;
+        this.vy *= 0.993;
+      }
+
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Arena boundary collision (keeps marbles inside the bomb arena circle R=445)
+      const distFromCenter = Math.hypot(this.x - ARENA_CX, this.y - ARENA_CY);
+      const arenaLimit = 445;
+      if (distFromCenter + this.radius > arenaLimit && distFromCenter > 0) {
+        const nx = (this.x - ARENA_CX) / distFromCenter;
+        const ny = (this.y - ARENA_CY) / distFromCenter;
+        this.x = ARENA_CX + nx * (arenaLimit - this.radius);
+        this.y = ARENA_CY + ny * (arenaLimit - this.radius);
+        const dot = this.vx * nx + this.vy * ny;
+        if (dot > 0) {
+          this.vx -= 1.8 * dot * nx;
+          this.vy -= 1.8 * dot * ny;
+          sfx.playMarbleClink(0.35);
+        }
+      }
+      return;
+    }
+
     if (currentGameMode === 'concentric_rings') {
       // Inward funnel pull towards Center Core
       const dx = ARENA_CX - this.x;
@@ -335,8 +381,8 @@ class Marble {
   }
 
   draw(ctx) {
-    // In Circle Survivor mode, eliminated marbles disappear completely from the screen
-    if (currentGameMode === 'circle_survivor' && this.finished && this !== winnerMarble) {
+    // In Circle Survivor & Bomb Tag modes, eliminated marbles disappear completely from the screen
+    if ((currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag') && this.finished && this !== winnerMarble) {
       return;
     }
 
@@ -397,12 +443,30 @@ class Marble {
     ctx.fill();
 
     // Outline
-    ctx.lineWidth = (this === camera.leadMarble) ? 3.5 : 2;
-    ctx.strokeStyle = (this === camera.leadMarble) ? '#fbbf24' : 'rgba(255, 255, 255, 0.8)';
+    const isBomb = currentGameMode === 'bomb_tag' && this === bombCarrier && !this.finished;
+    ctx.lineWidth = isBomb ? 4 : ((this === camera.leadMarble) ? 3.5 : 2);
+    ctx.strokeStyle = isBomb ? '#ef4444' : ((this === camera.leadMarble) ? '#fbbf24' : 'rgba(255, 255, 255, 0.8)');
+    if (isBomb) {
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 22;
+    }
     ctx.stroke();
 
-    // Crown or Rank Badge on Leader
-    if (this === camera.leadMarble && !this.finished) {
+    // Bomb Tag Ticking Bomb Indicator
+    if (isBomb) {
+      ctx.fillStyle = '#f59e0b';
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 12;
+      ctx.font = '900 16px Montserrat, sans-serif';
+      ctx.textAlign = 'center';
+      const pulse = Math.sin(Date.now() * 0.02) * 3;
+      ctx.fillText(`💣 ${Math.max(0, bombTimer).toFixed(1)}s`, 0, -this.radius - 12 + pulse);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.shadowBlur = 0;
+      ctx.fillText(this.name, 0, this.radius + 16);
+    } else if (this === camera.leadMarble && !this.finished && currentGameMode !== 'bomb_tag') {
       ctx.fillStyle = '#fbbf24';
       ctx.font = 'bold 14px Inter, sans-serif';
       ctx.textAlign = 'center';
@@ -412,7 +476,6 @@ class Marble {
       ctx.font = 'bold 12px Inter, sans-serif';
       ctx.fillText(this.name, 0, this.radius + 16);
     } else if (this.finishRank) {
-      // Medal badge
       ctx.fillStyle = this.finishRank === 1 ? '#fbbf24' : (this.finishRank === 2 ? '#cbd5e1' : '#f97316');
       ctx.font = 'bold 13px Inter, sans-serif';
       ctx.textAlign = 'center';
@@ -644,7 +707,31 @@ function initRace() {
   }
 
   // Setup mode-specific layout
-  if (currentGameMode === 'concentric_rings') {
+  if (currentGameMode === 'bomb_tag') {
+    // BOMB TAG: Spawn inside active battle arena and assign initial ticking bomb
+    const total = targetCountries.length;
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((country, i) => {
+      const r = 40 + Math.sqrt((i + 0.5) / total) * 360;
+      const theta = i * 2.3999632;
+      const x = ARENA_CX + Math.cos(theta) * r;
+      const y = ARENA_CY + Math.sin(theta) * r;
+      const m = new Marble(country, x, y);
+      m.vx = (Math.random() - 0.5) * 5;
+      m.vy = (Math.random() - 0.5) * 5;
+      marbles.push(m);
+    });
+
+    // Assign initial bomb to a random marble
+    bombCarrier = marbles[Math.floor(Math.random() * marbles.length)];
+    bombTimer = BOMB_ROUND_DURATION;
+    bombTransferCooldown = 0.5;
+
+    camera.y = 0;
+    camera.targetY = 0;
+    camera.leadMarble = bombCarrier;
+  } else if (currentGameMode === 'concentric_rings') {
     // CONCENTRIC RINGS MAZE: Reset rings and spawn in outer orbital band
     const mult = currentDifficulty === 'Easy' ? 0.75 : (currentDifficulty === 'Hard' ? 1.35 : 1.0);
     CONCENTRIC_RINGS[0].speed = -0.012 * mult;
@@ -976,8 +1063,127 @@ function handleConcentricRingsPhysics() {
   }
 }
 
+// Bomb Tag / Hot Potato Physics Engine
+function handleBombTagPhysics() {
+  if (bombTransferCooldown > 0) bombTransferCooldown -= 0.016;
+  bombTimer -= 0.016;
+
+  // Spatial Marble-Marble Collisions
+  marbles.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < marbles.length; i++) {
+    const m1 = marbles[i];
+    if (m1.finished) continue;
+
+    for (let j = i + 1; j < marbles.length; j++) {
+      const m2 = marbles[j];
+      if (m2.finished) continue;
+      if (m2.y - m1.y > m1.radius + m2.radius) break;
+
+      const dx = m2.x - m1.x;
+      const dy = m2.y - m1.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = m1.radius + m2.radius;
+
+      if (dist < minDist && dist > 0) {
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        m1.x -= nx * overlap * 0.5;
+        m1.y -= ny * overlap * 0.5;
+        m2.x += nx * overlap * 0.5;
+        m2.y += ny * overlap * 0.5;
+
+        const kx = m1.vx - m2.vx;
+        const ky = m1.vy - m2.vy;
+        const p = 2 * (nx * kx + ny * ky) / (m1.mass + m2.mass);
+
+        m1.vx -= p * m2.mass * nx;
+        m1.vy -= p * m2.mass * ny;
+        m2.vx += p * m1.mass * nx;
+        m2.vy += p * m1.mass * ny;
+
+        // Bomb Tag Transfer on Contact!
+        if (bombTransferCooldown <= 0 && (m1 === bombCarrier || m2 === bombCarrier)) {
+          const oldCarrier = bombCarrier;
+          bombCarrier = (m1 === bombCarrier) ? m2 : m1;
+          bombTransferCooldown = 0.45; // Prevent instant re-tagging
+          sfx.playBumper();
+          createCelebration(bombCarrier.x, bombCarrier.y);
+          addFeedItem(`💣 TAG! ${oldCarrier.name} passed bomb to ${bombCarrier.name}!`, '#f59e0b');
+        } else if (Math.hypot(kx, ky) > 3) {
+          sfx.playMarbleClink(0.3);
+        }
+      }
+    }
+
+    // Bounce off Center Deflector Bumper
+    const cdx = m1.x - ARENA_CX;
+    const cdy = m1.y - ARENA_CY;
+    const cdist = Math.hypot(cdx, cdy);
+    if (cdist < m1.radius + 45 && cdist > 0) {
+      const cnx = cdx / cdist;
+      const cny = cdy / cdist;
+      m1.x = ARENA_CX + cnx * (m1.radius + 45);
+      m1.y = ARENA_CY + cny * (m1.radius + 45);
+      m1.vx = cnx * 18 + (Math.random() - 0.5) * 4;
+      m1.vy = cny * 18 + (Math.random() - 0.5) * 4;
+      sfx.playBumper();
+      createCelebration(ARENA_CX, ARENA_CY);
+    }
+  }
+
+  // Check Timer Expiration / Detonation!
+  if (bombTimer <= 0 && bombCarrier && !bombCarrier.finished) {
+    const victim = bombCarrier;
+    victim.finished = true;
+    finishedMarbles.push(victim);
+    sfx.playBumper();
+
+    // Massive Explosion Sparks
+    createCelebration(victim.x, victim.y);
+    const expColors = ['#ef4444', '#f59e0b', '#dc2626', '#ffffff'];
+    for (let p = 0; p < 35; p++) {
+      particles.push(new Particle(victim.x, victim.y, expColors[p % 4], 14));
+    }
+
+    const alive = marbles.filter(m => !m.finished);
+    victim.finishRank = alive.length + 1;
+    addFeedItem(`💥 KABOOM! ${victim.name} Exploded! (${alive.length} Left)`, '#ef4444');
+
+    // Check Victory (Last Nation Standing!)
+    if (alive.length === 1) {
+      winnerMarble = alive[0];
+      winnerMarble.finished = true;
+      winnerMarble.finishRank = 1;
+      sfx.playVictory();
+      createCelebration(winnerMarble.x, winnerMarble.y);
+      showWinnerBanner(winnerMarble);
+      if (typeof updateVideoTitles === 'function') updateVideoTitles(winnerMarble);
+
+      if (isRecording) {
+        setTimeout(() => {
+          if (isRecording && typeof stopRecording === 'function') {
+            stopRecording();
+          }
+        }, 3500);
+      }
+    } else if (alive.length > 1) {
+      // Pick next bomb carrier randomly among remaining survivors!
+      bombCarrier = alive[Math.floor(Math.random() * alive.length)];
+      bombTimer = BOMB_ROUND_DURATION;
+      bombTransferCooldown = 0.6;
+    }
+    updateLeaderboardUI();
+  }
+}
+
 // Physics & Collision Handling
 function handlePhysics() {
+  if (currentGameMode === 'bomb_tag') {
+    handleBombTagPhysics();
+    return;
+  }
   if (currentGameMode === 'concentric_rings') {
     handleConcentricRingsPhysics();
     return;
@@ -1154,6 +1360,12 @@ function handlePhysics() {
 
 // Track Leader & Update Action Camera
 function updateCamera() {
+  if (currentGameMode === 'bomb_tag') {
+    camera.targetY = 0;
+    camera.y = 0;
+    camera.leadMarble = bombCarrier || marbles.find(m => !m.finished) || null;
+    return;
+  }
   if (currentGameMode === 'circle_survivor' || currentGameMode === 'concentric_rings') {
     camera.targetY = 0;
     camera.y = 0;
@@ -1242,8 +1454,9 @@ function showWinnerBanner(winner) {
   flagImg.src = getFlagUrl(winner.code);
   nameElem.innerText = winner.name;
   let stats = `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
-  if (currentGameMode === 'circle_survivor') stats = `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`;
-  if (currentGameMode === 'concentric_rings') stats = `🏆 FIRST NATION TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
+  if (currentGameMode === 'bomb_tag') stats = `🏆 HOT POTATO CHAMPION: SURVIVED ALL EXPLOSIONS!`;
+  else if (currentGameMode === 'circle_survivor') stats = `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`;
+  else if (currentGameMode === 'concentric_rings') stats = `🏆 FIRST NATION TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
   statsElem.innerText = stats;
   overlay.classList.add('active');
 }
@@ -1503,8 +1716,69 @@ function drawConcentricRingsMaze(ctx) {
   ctx.restore();
 }
 
+// Render Bomb Tag Active Arena
+function drawBombTagArena(ctx) {
+  ctx.save();
+
+  // Dark fiery crimson arena background
+  const floorGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 20, ARENA_CX, ARENA_CY, 460);
+  floorGrad.addColorStop(0, '#1c080b');
+  floorGrad.addColorStop(0.7, '#0f0507');
+  floorGrad.addColorStop(1, '#050203');
+  ctx.fillStyle = floorGrad;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 450, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glowing red warning perimeter
+  ctx.strokeStyle = '#ef4444';
+  ctx.shadowColor = '#dc2626';
+  ctx.shadowBlur = 24;
+  ctx.lineWidth = 14;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 445, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner warning grid
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.08)';
+  ctx.lineWidth = 2;
+  [120, 240, 360].forEach(r => {
+    ctx.beginPath();
+    ctx.arc(ARENA_CX, ARENA_CY, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Center Deflector Bumper
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 45, 0, Math.PI * 2);
+  const cGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 2, ARENA_CX, ARENA_CY, 45);
+  cGrad.addColorStop(0, '#f97316');
+  cGrad.addColorStop(1, '#b91c1c');
+  ctx.fillStyle = cGrad;
+  ctx.shadowColor = '#ea580c';
+  ctx.shadowBlur = 25;
+  ctx.fill();
+
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  ctx.font = '28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💣', ARENA_CX, ARENA_CY);
+  ctx.restore();
+
+  ctx.restore();
+}
+
 // Render Track & Environment
 function drawTrackEnvironment(ctx) {
+  if (currentGameMode === 'bomb_tag') {
+    drawBombTagArena(ctx);
+    return;
+  }
   if (currentGameMode === 'concentric_rings') {
     drawConcentricRingsMaze(ctx);
     return;
@@ -1772,7 +2046,9 @@ function drawShortsHUD() {
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 15;
   let regionTitle = "COUNTRY MARBLE RACE";
-  if (currentGameMode === 'circle_survivor') {
+  if (currentGameMode === 'bomb_tag') {
+    regionTitle = (selectedContinent === 'All' ? "BOMB TAG: HOT POTATO" : `${selectedContinent.toUpperCase()} BOMB TAG`);
+  } else if (currentGameMode === 'circle_survivor') {
     regionTitle = (selectedContinent === 'All' ? "CIRCLE SURVIVOR: BATTLE ROYALE" : `${selectedContinent.toUpperCase()} CIRCLE SURVIVOR`);
   } else if (currentGameMode === 'concentric_rings') {
     regionTitle = (selectedContinent === 'All' ? "CONCENTRIC RING MAZE" : `${selectedContinent.toUpperCase()} RING MAZE`);
@@ -1786,7 +2062,9 @@ function drawShortsHUD() {
   ctx.shadowBlur = 0;
   const aliveCount = marbles.filter(m => !m.finished).length;
   let countLabel = `${marbles.length} NATIONS`;
-  if (currentGameMode === 'circle_survivor') {
+  if (currentGameMode === 'bomb_tag') {
+    countLabel = `${aliveCount} SURVIVORS • DETONATION: ${Math.max(0, bombTimer).toFixed(1)}s`;
+  } else if (currentGameMode === 'circle_survivor') {
     countLabel = `${aliveCount} SURVIVORS REMAINING`;
   } else if (currentGameMode === 'concentric_rings') {
     countLabel = `1ST TO REACH THE CORE WINS`;
@@ -1810,8 +2088,9 @@ function drawShortsHUD() {
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'center';
     let leaderLabel = `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
-    if (currentGameMode === 'circle_survivor') leaderLabel = `🛡️ LAST STAND: ${camera.leadMarble.name}`;
-    if (currentGameMode === 'concentric_rings') leaderLabel = `🎯 CLOSEST TO CORE: ${camera.leadMarble.name}`;
+    if (currentGameMode === 'bomb_tag') leaderLabel = `💣 TICKING BOMB: ${bombCarrier ? bombCarrier.name : 'None'} (${Math.max(0, bombTimer).toFixed(1)}s)`;
+    else if (currentGameMode === 'circle_survivor') leaderLabel = `🛡️ LAST STAND: ${camera.leadMarble.name}`;
+    else if (currentGameMode === 'concentric_rings') leaderLabel = `🎯 CLOSEST TO CORE: ${camera.leadMarble.name}`;
     ctx.fillText(leaderLabel, V_WIDTH / 2, 186);
   }
 
@@ -1868,8 +2147,9 @@ function drawCanvasWinnerOverlay() {
   ctx.shadowBlur = 25;
   ctx.textAlign = 'center';
   let championTitle = '🏆 1ST PLACE CHAMPION! 🏆';
-  if (currentGameMode === 'circle_survivor') championTitle = '🏆 LAST SURVIVOR CHAMPION! 🏆';
-  if (currentGameMode === 'concentric_rings') championTitle = '🏆 RING MAZE CHAMPION! 🏆';
+  if (currentGameMode === 'bomb_tag') championTitle = '💣 HOT POTATO CHAMPION! 💣';
+  else if (currentGameMode === 'circle_survivor') championTitle = '🏆 LAST SURVIVOR CHAMPION! 🏆';
+  else if (currentGameMode === 'concentric_rings') championTitle = '🏆 RING MAZE CHAMPION! 🏆';
   ctx.fillText(championTitle, V_WIDTH / 2, centerY - 230);
 
   // Giant Flag Texture (280x280 circular flag medal)
@@ -1915,8 +2195,9 @@ function drawCanvasWinnerOverlay() {
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
   let winSubtitle = `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
-  if (currentGameMode === 'circle_survivor') winSubtitle = `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`;
-  if (currentGameMode === 'concentric_rings') winSubtitle = `🥇 FIRST TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
+  if (currentGameMode === 'bomb_tag') winSubtitle = `🥇 DODGED ALL TNT DETONATIONS & WON HOT POTATO!`;
+  else if (currentGameMode === 'circle_survivor') winSubtitle = `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`;
+  else if (currentGameMode === 'concentric_rings') winSubtitle = `🥇 FIRST TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
   ctx.fillText(winSubtitle, V_WIDTH / 2, centerY + 260);
 
   // YouTube Shorts Engagement Callout
@@ -1927,7 +2208,7 @@ function drawCanvasWinnerOverlay() {
   ctx.restore();
 }
 
-// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings)
+// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings vs Bomb Tag)
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -1942,7 +2223,9 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       isPaused = false;
       const startBtn = document.getElementById('startBtn');
       if (startBtn) {
-        if (currentGameMode === 'concentric_rings') {
+        if (currentGameMode === 'bomb_tag') {
+          startBtn.innerText = '▶️ Start Bomb Tag & Auto-Record';
+        } else if (currentGameMode === 'concentric_rings') {
           startBtn.innerText = '▶️ Start Ring Maze & Auto-Record';
         } else if (currentGameMode === 'circle_survivor') {
           startBtn.innerText = '▶️ Drop Into Ring & Auto-Record';
@@ -1982,9 +2265,11 @@ document.getElementById('startBtn').addEventListener('click', () => {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = currentGameMode === 'concentric_rings' 
-      ? '🔄 Restart Maze & Record' 
-      : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record');
+    document.getElementById('startBtn').innerText = currentGameMode === 'bomb_tag'
+      ? '🔄 Restart Bomb Tag & Record'
+      : (currentGameMode === 'concentric_rings' 
+        ? '🔄 Restart Maze & Record' 
+        : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record'));
     document.getElementById('pauseBtn').disabled = false;
 
     // 1-Click Auto-Record
@@ -2228,37 +2513,49 @@ function stopRecording() {
 let currentWinner = null;
 
 const VIRAL_TITLE_TEMPLATES = [
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
-    : (ctx.mode === 'circle_survivor'
-      ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
-      : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`),
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
-    : (ctx.mode === 'circle_survivor'
-      ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
-      : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`),
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
-    : (ctx.mode === 'circle_survivor'
-      ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
-      : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`),
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
-    : (ctx.mode === 'circle_survivor'
-      ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
-      : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `💣 ${ctx.flagEmoji} ${ctx.count} Countries Pass The Ticking TNT: Who Explodes?! 💥 #shorts #bombtag`
+    : (ctx.mode === 'concentric_rings'
+      ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
+      : (ctx.mode === 'circle_survivor'
+        ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
+        : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`)),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `😱 ${ctx.winnerHighlight} In The Most Insane Hot Potato Bomb Battle! 💣 #flagsbattle`
+    : (ctx.mode === 'concentric_rings'
+      ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
+      : (ctx.mode === 'circle_survivor'
+        ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
+        : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`)),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `⚡ Extreme ${ctx.diff} Bomb Tag: ${ctx.count} Nations Bouncing & Passing TNT Before Detonation! 💥 #shorts`
+    : (ctx.mode === 'concentric_rings'
+      ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
+      : (ctx.mode === 'circle_survivor'
+        ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
+        : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`)),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `🥇 ${ctx.winnerName} DODGES EVERY EXPLOSION TO WIN HOT POTATO! (${ctx.regionName} Edition) 🏆 #marblerace`
+    : (ctx.mode === 'concentric_rings'
+      ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
+      : (ctx.mode === 'circle_survivor'
+        ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
+        : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`)),
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
-    : (ctx.mode === 'circle_survivor'
-      ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
-      : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`),
-  (ctx) => ctx.mode === 'concentric_rings'
-    ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-    : (ctx.mode === 'circle_survivor'
-      ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-      : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `💣 CAN YOUR COUNTRY PASS THE TICKING BOMB IN TIME?! 🌍 #bombtag #shorts`
+    : (ctx.mode === 'concentric_rings'
+      ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
+      : (ctx.mode === 'circle_survivor'
+        ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
+        : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`)),
+  (ctx) => ctx.mode === 'bomb_tag'
+    ? `🏆 The Most Chaotic Bomb Tag Marble Battle You've Ever Seen! (${ctx.regionName}) 💣 #shorts`
+    : (ctx.mode === 'concentric_rings'
+      ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+      : (ctx.mode === 'circle_survivor'
+        ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+        : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`)),
   (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`
 ];
 
@@ -2331,7 +2628,10 @@ function updateVideoTitles(winner = null) {
   let winText = `Who will reach the finish line?`;
   let modeTitle = "Downhill Marble Race Simulator";
 
-  if (currentGameMode === 'circle_survivor') {
+  if (currentGameMode === 'bomb_tag') {
+    modeTitle = "Bomb Tag Hot Potato Simulator";
+    winText = winner ? `🥇 Hot Potato Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will pass the ticking bomb before detonation?`;
+  } else if (currentGameMode === 'circle_survivor') {
     modeTitle = "Circle Survivor Battle Royale Simulator";
     winText = winner ? `🥇 Last Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the spinning ring hazards?`;
   } else if (currentGameMode === 'concentric_rings') {
