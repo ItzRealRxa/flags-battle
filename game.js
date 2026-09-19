@@ -1020,26 +1020,37 @@ document.querySelectorAll('.diff-btn').forEach(btn => {
   });
 });
 
-// Controls
+// Controls - 1-Click Drop Gate & Auto-Record
 document.getElementById('startBtn').addEventListener('click', () => {
   sfx.init();
   if (!isRunning) {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = 'Restart Race';
+    document.getElementById('startBtn').innerText = '🔄 Restart Race & Record';
     document.getElementById('pauseBtn').disabled = false;
+
+    // 1-Click Auto-Record
+    if (!isRecording) {
+      startRecording();
+    }
   } else {
+    if (isRecording) {
+      stopRecording();
+    }
     initRace();
     gateOpen = true;
     isRunning = true;
     isPaused = false;
+    setTimeout(() => {
+      if (!isRecording) startRecording();
+    }, 250);
   }
 });
 
 document.getElementById('pauseBtn').addEventListener('click', () => {
   isPaused = !isPaused;
-  document.getElementById('pauseBtn').innerText = isPaused ? 'Resume' : 'Pause';
+  document.getElementById('pauseBtn').innerText = isPaused ? '▶️ Resume' : '⏸️ Pause';
 });
 
 document.getElementById('soundBtn').addEventListener('click', () => {
@@ -1048,9 +1059,15 @@ document.getElementById('soundBtn').addEventListener('click', () => {
 });
 
 document.getElementById('restartModalBtn').addEventListener('click', () => {
+  if (isRecording) {
+    stopRecording();
+  }
   initRace();
   gateOpen = true;
   isRunning = true;
+  setTimeout(() => {
+    if (!isRecording) startRecording();
+  }, 250);
 });
 
 // ==========================================
