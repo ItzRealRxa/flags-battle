@@ -32,6 +32,22 @@ const camera = {
   leadMarble: null
 };
 
+// Game Mode Configuration
+let currentGameMode = 'race'; // 'race' | 'circle_survivor'
+
+// Circle Survivor Arena Constants (Vertical 9:16 Canvas)
+const ARENA_CX = 540;
+const ARENA_CY = 990;
+const ARENA_RADIUS = 450;
+let arenaAngle = 0;
+let arenaSpeed = 0.015;
+const ARENA_NUM_GAPS = 4;
+const ARENA_GAP_ARC = 0.58; // radians (~33° escape gap per quadrant)
+let centerBladeAngle = 0;
+let survivorObstacles = {
+  orbitBumpers: []
+};
+
 // Track Obstacles
 let walls = [];
 let pegs = [];
@@ -88,17 +104,91 @@ class Marble {
 
   update() {
     if (this.finished) {
-      // Gentle slide in podium area
-      this.vx *= 0.92;
-      this.vy *= 0.92;
-      this.x += this.vx;
-      this.y += this.vy;
+      if (currentGameMode === 'circle_survivor') {
+        // Fall down out of view when eliminated from circle
+        this.vy += 0.25;
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+        this.x += this.vx;
+        this.y += this.vy;
+      } else {
+        // Gentle slide in podium area
+        this.vx *= 0.92;
+        this.vy *= 0.92;
+        this.x += this.vx;
+        this.y += this.vy;
+      }
       return;
     }
 
     if (this.bouncePulse > 0) this.bouncePulse -= 0.05;
 
-    // Apply gravity
+    // Mode-specific Movement & Boundaries
+    if (currentGameMode === 'circle_survivor') {
+      // Circle Survivor Physics:
+      // Slight chaotic attraction/gravity keeping marbles bouncing dynamically
+      const dx = ARENA_CX - this.x;
+      const dy = ARENA_CY - this.y;
+      const d = Math.hypot(dx, dy);
+
+      if (d > 30) {
+        this.vx += (dx / d) * 0.06;
+        this.vy += (dy / d) * 0.06;
+      }
+      // Micro-jitter to prevent stagnant stacking
+      this.vx += (Math.random() - 0.5) * 0.12;
+      this.vy += (Math.random() - 0.5) * 0.12;
+
+      this.vx *= 0.994;
+      this.vy *= 0.994;
+
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // Save speed trail for active survivor leaders
+      if (this === camera.leadMarble && Math.hypot(this.vx, this.vy) > 3.5) {
+        this.trail.unshift({ x: this.x, y: this.y, alpha: 1 });
+        if (this.trail.length > 10) this.trail.pop();
+      } else if (this.trail.length > 0) {
+        this.trail.pop();
+      }
+
+      // Check if knocked out of arena through gaps
+      const distFromCenter = Math.hypot(this.x - ARENA_CX, this.y - ARENA_CY);
+      if (distFromCenter > ARENA_RADIUS + 75 && !this.finished) {
+        this.finished = true;
+        finishedMarbles.push(this);
+        const aliveSurvivors = marbles.filter(m => !m.finished);
+        this.finishRank = aliveSurvivors.length + 1; // e.g., 2nd eliminated, etc.
+        sfx.playMarbleClink(0.8);
+        createCelebration(this.x, this.y);
+
+        addFeedItem(`💀 #${this.finishRank} Eliminated: ${this.name}`, '#f43f5e');
+
+        // Check if only 1 country survives in the ring!
+        if (aliveSurvivors.length === 1 && !winnerMarble) {
+          winnerMarble = aliveSurvivors[0];
+          winnerMarble.finishRank = 1;
+          sfx.playVictory();
+          createCelebration(winnerMarble.x, winnerMarble.y);
+          showWinnerBanner(winnerMarble);
+          if (typeof updateVideoTitles === 'function') updateVideoTitles(winnerMarble);
+
+          // Auto-stop recording after 3.5s so champion podium is captured
+          if (isRecording) {
+            setTimeout(() => {
+              if (isRecording && typeof stopRecording === 'function') {
+                stopRecording();
+              }
+            }, 3500);
+          }
+        }
+        updateLeaderboardUI();
+      }
+      return;
+    }
+
+    // Standard Downhill Race Physics
     this.vy += GRAVITY;
     this.vx *= FRICTION;
     this.vy *= FRICTION;
@@ -440,7 +530,7 @@ function buildTrack() {
   walls.push({ x1: L, y1: TRACK_HEIGHT - 80, x2: R, y2: TRACK_HEIGHT - 80, thickness: 20 });
 }
 
-// Initialize Marbles at the Top Launch Box
+// Initialize Marbles (Downhill Race or Circle Survivor)
 function initRace() {
   marbles = [];
   finishedMarbles = [];
@@ -450,41 +540,230 @@ function initRace() {
   gateOpen = false;
   winnerMarble = null;
   winnerBannerAnim = 0;
+  arenaAngle = 0;
+  centerBladeAngle = 0;
   document.getElementById('winnerOverlay').classList.remove('active');
-
-  buildTrack();
 
   // Filter countries by selected region/continent
   const targetCountries = (selectedContinent === "All")
     ? [...COUNTRIES_DATA]
     : COUNTRIES_DATA.filter(c => c.continent.toLowerCase() === selectedContinent.toLowerCase());
 
-  const total = targetCountries.length;
-  const cols = total > 60 ? 15 : (total > 30 ? 10 : (total > 15 ? 7 : 5));
-  const spacingX = Math.min(56, (V_WIDTH - 280) / cols);
-  const spacingY = 46;
-  const startX = V_WIDTH / 2 - ((cols - 1) * spacingX) / 2;
-  const startY = 80;
+  // Tuning speeds by difficulty
+  if (currentDifficulty === 'Easy') {
+    arenaSpeed = 0.010;
+  } else if (currentDifficulty === 'Hard') {
+    arenaSpeed = 0.024;
+  } else {
+    arenaSpeed = 0.016;
+  }
 
-  // Shuffle order for fair start positions
-  const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+  // Setup mode-specific layout
+  if (currentGameMode === 'circle_survivor') {
+    // CIRCLE SURVIVOR: Spawn in rotating arena
+    const total = targetCountries.length;
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
 
-  shuffled.forEach((country, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const x = startX + col * spacingX + (Math.random() - 0.5) * 6;
-    const y = startY + row * spacingY + (Math.random() - 0.5) * 6;
-    marbles.push(new Marble(country, x, y));
-  });
+    shuffled.forEach((country, i) => {
+      // Fermat's spiral / golden angle distribution inside arena
+      const r = 50 + Math.sqrt((i + 0.5) / total) * (ARENA_RADIUS - 85);
+      const theta = i * 2.399963229728653; // golden angle
+      const x = ARENA_CX + Math.cos(theta) * r;
+      const y = ARENA_CY + Math.sin(theta) * r;
+      const m = new Marble(country, x, y);
+      m.vx = (Math.random() - 0.5) * 4.5;
+      m.vy = (Math.random() - 0.5) * 4.5;
+      marbles.push(m);
+    });
 
-  camera.y = 0;
-  camera.leadMarble = marbles[0];
+    // Orbit Pinball Bumpers
+    survivorObstacles.orbitBumpers = [
+      { angleOffset: 0, dist: 235, radius: 36 },
+      { angleOffset: Math.PI * 0.5, dist: 235, radius: 36 },
+      { angleOffset: Math.PI, dist: 235, radius: 36 },
+      { angleOffset: Math.PI * 1.5, dist: 235, radius: 36 }
+    ];
+
+    camera.y = 0;
+    camera.targetY = 0;
+    camera.leadMarble = marbles[0];
+  } else {
+    // DOWNHILL RACE: Build track and spawn in start box
+    buildTrack();
+
+    const total = targetCountries.length;
+    const cols = total > 60 ? 15 : (total > 30 ? 10 : (total > 15 ? 7 : 5));
+    const spacingX = Math.min(56, (V_WIDTH - 280) / cols);
+    const spacingY = 46;
+    const startX = V_WIDTH / 2 - ((cols - 1) * spacingX) / 2;
+    const startY = 80;
+
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((country, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = startX + col * spacingX + (Math.random() - 0.5) * 6;
+      const y = startY + row * spacingY + (Math.random() - 0.5) * 6;
+      marbles.push(new Marble(country, x, y));
+    });
+
+    camera.y = 0;
+    camera.leadMarble = marbles[0];
+  }
+
   updateLeaderboardUI();
   if (typeof updateVideoTitles === 'function') updateVideoTitles(null);
 }
 
+// Circle Survivor Battle Royale Arena Physics
+function handleCircleSurvivorPhysics() {
+  arenaAngle += arenaSpeed;
+  centerBladeAngle -= arenaSpeed * 1.8;
+
+  // Marble-Marble Collisions
+  marbles.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < marbles.length; i++) {
+    const m1 = marbles[i];
+    if (m1.finished) continue;
+
+    for (let j = i + 1; j < marbles.length; j++) {
+      const m2 = marbles[j];
+      if (m2.finished) continue;
+      if (m2.y - m1.y > m1.radius + m2.radius) break; // Spatial prune
+
+      const dx = m2.x - m1.x;
+      const dy = m2.y - m1.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = m1.radius + m2.radius;
+
+      if (dist < minDist && dist > 0) {
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        m1.x -= nx * overlap * 0.5;
+        m1.y -= ny * overlap * 0.5;
+        m2.x += nx * overlap * 0.5;
+        m2.y += ny * overlap * 0.5;
+
+        const kx = m1.vx - m2.vx;
+        const ky = m1.vy - m2.vy;
+        const p = 2 * (nx * kx + ny * ky) / (m1.mass + m2.mass);
+
+        m1.vx -= p * m2.mass * nx;
+        m1.vy -= p * m2.mass * ny;
+        m2.vx += p * m1.mass * nx;
+        m2.vy += p * m1.mass * ny;
+
+        if (Math.hypot(kx, ky) > 3) {
+          sfx.playMarbleClink(0.3);
+        }
+      }
+    }
+
+    // Marble vs Central Bumper
+    const cdx = m1.x - ARENA_CX;
+    const cdy = m1.y - ARENA_CY;
+    const cdist = Math.hypot(cdx, cdy);
+    const centerBumperRadius = 55;
+
+    if (cdist < m1.radius + centerBumperRadius && cdist > 0) {
+      const cnx = cdx / cdist;
+      const cny = cdy / cdist;
+      m1.x = ARENA_CX + cnx * (m1.radius + centerBumperRadius);
+      m1.y = ARENA_CY + cny * (m1.radius + centerBumperRadius);
+      m1.vx = cnx * 19 + (Math.random() - 0.5) * 4;
+      m1.vy = cny * 19 + (Math.random() - 0.5) * 4;
+      sfx.playBumper();
+      createCelebration(ARENA_CX, ARENA_CY);
+    }
+
+    // Marble vs Center Spinning Cross Blades (4 blades)
+    const bladeLength = 150;
+    const numBlades = 4;
+    for (let b = 0; b < numBlades; b++) {
+      const bAngle = centerBladeAngle + (b * Math.PI * 2) / numBlades;
+      const bx2 = ARENA_CX + Math.cos(bAngle) * bladeLength;
+      const by2 = ARENA_CY + Math.sin(bAngle) * bladeLength;
+
+      const lineLen2 = (bx2 - ARENA_CX) ** 2 + (by2 - ARENA_CY) ** 2;
+      let t = ((m1.x - ARENA_CX) * (bx2 - ARENA_CX) + (m1.y - ARENA_CY) * (by2 - ARENA_CY)) / lineLen2;
+      t = Math.max(0, Math.min(1, t));
+      const projX = ARENA_CX + t * (bx2 - ARENA_CX);
+      const projY = ARENA_CY + t * (by2 - ARENA_CY);
+      const distToBlade = Math.hypot(m1.x - projX, m1.y - projY);
+
+      if (distToBlade < m1.radius + 8) {
+        const bladeVx = -Math.sin(bAngle) * (-arenaSpeed * 1.8) * bladeLength;
+        const bladeVy = Math.cos(bAngle) * (-arenaSpeed * 1.8) * bladeLength;
+        m1.vx += bladeVx * 2.5 + (Math.random() - 0.5) * 4;
+        m1.vy += bladeVy * 2.5 + (Math.random() - 0.5) * 4;
+        sfx.playMarbleClink(0.7);
+      }
+    }
+
+    // Marble vs 4 Orbit Pinball Bumpers
+    survivorObstacles.orbitBumpers.forEach(ob => {
+      const orbitAng = arenaAngle * 0.75 + ob.angleOffset;
+      const ox = ARENA_CX + Math.cos(orbitAng) * ob.dist;
+      const oy = ARENA_CY + Math.sin(orbitAng) * ob.dist;
+
+      const odx = m1.x - ox;
+      const ody = m1.y - oy;
+      const odist = Math.hypot(odx, ody);
+      if (odist < m1.radius + ob.radius && odist > 0) {
+        const onx = odx / odist;
+        const ony = ody / odist;
+        m1.x = ox + onx * (m1.radius + ob.radius);
+        m1.y = oy + ony * (m1.radius + ob.radius);
+        m1.vx = onx * 18 + (Math.random() - 0.5) * 4;
+        m1.vy = ony * 18 + (Math.random() - 0.5) * 4;
+        sfx.playBumper();
+        createCelebration(ox, oy);
+      }
+    });
+
+    // Marble vs Outer Rotating Ring Boundary
+    const wallDist = Math.hypot(m1.x - ARENA_CX, m1.y - ARENA_CY);
+    if (wallDist + m1.radius >= ARENA_RADIUS && wallDist <= ARENA_RADIUS + 35) {
+      let ang = Math.atan2(m1.y - ARENA_CY, m1.x - ARENA_CX) - arenaAngle;
+      ang = (ang % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+
+      const sectorSize = (Math.PI * 2) / ARENA_NUM_GAPS; // PI / 2
+      const posInSector = ang % sectorSize;
+      const isGap = posInSector >= (sectorSize - ARENA_GAP_ARC);
+
+      if (!isGap) {
+        // Solid wall arc reflection!
+        const wnx = (m1.x - ARENA_CX) / wallDist;
+        const wny = (m1.y - ARENA_CY) / wallDist;
+
+        m1.x = ARENA_CX + wnx * (ARENA_RADIUS - m1.radius);
+        m1.y = ARENA_CY + wny * (ARENA_RADIUS - m1.radius);
+
+        const tanVx = -wny * arenaSpeed * ARENA_RADIUS;
+        const tanVy = wnx * arenaSpeed * ARENA_RADIUS;
+
+        const dot = m1.vx * wnx + m1.vy * wny;
+        if (dot > 0) {
+          m1.vx = (m1.vx - 1.85 * dot * wnx) + tanVx * 0.35;
+          m1.vy = (m1.vy - 1.85 * dot * wny) + tanVy * 0.35;
+          sfx.playMarbleClink(0.4);
+        }
+      }
+      // If isGap: marble glides through into space and triggers elimination!
+    }
+  }
+}
+
 // Physics & Collision Handling
 function handlePhysics() {
+  if (currentGameMode === 'circle_survivor') {
+    handleCircleSurvivorPhysics();
+    return;
+  }
+
   // Update Spinners
   spinners.forEach(sp => {
     sp.angle += sp.speed;
@@ -652,6 +931,25 @@ function handlePhysics() {
 
 // Track Leader & Update Action Camera
 function updateCamera() {
+  if (currentGameMode === 'circle_survivor') {
+    camera.targetY = 0;
+    camera.y = 0;
+
+    // In circle survivor, lead is the marble closest to center or surviving
+    const alive = marbles.filter(m => !m.finished);
+    if (alive.length > 0) {
+      alive.sort((a, b) => {
+        const da = Math.hypot(a.x - ARENA_CX, a.y - ARENA_CY);
+        const db = Math.hypot(b.x - ARENA_CX, b.y - ARENA_CY);
+        return da - db;
+      });
+      camera.leadMarble = alive[0];
+    } else {
+      camera.leadMarble = finishedMarbles[finishedMarbles.length - 1] || null;
+    }
+    return;
+  }
+
   let lead = null;
   let maxY = -1;
 
@@ -720,12 +1018,165 @@ function showWinnerBanner(winner) {
 
   flagImg.src = getFlagUrl(winner.code);
   nameElem.innerText = winner.name;
-  statsElem.innerText = `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
+  statsElem.innerText = (currentGameMode === 'circle_survivor')
+    ? `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`
+    : `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
   overlay.classList.add('active');
+}
+
+// Render Circle Survivor Spinning Arena
+function drawCircleSurvivorArena(ctx) {
+  ctx.save();
+
+  // Dark glowing battle arena floor circle
+  const floorGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 20, ARENA_CX, ARENA_CY, ARENA_RADIUS);
+  floorGrad.addColorStop(0, '#0f172a');
+  floorGrad.addColorStop(0.7, '#090d16');
+  floorGrad.addColorStop(1, '#020617');
+  ctx.fillStyle = floorGrad;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, ARENA_RADIUS, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Arena floor grid rings & radial lines
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+  ctx.lineWidth = 2;
+  [120, 240, 360].forEach(r => {
+    ctx.beginPath();
+    ctx.arc(ARENA_CX, ARENA_CY, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Danger boundary halo outside ring
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.2)';
+  ctx.lineWidth = 14;
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, ARENA_RADIUS + 30, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Rotating Segmented Outer Wall Arcs (4 segments with escape gaps)
+  const sectorSize = (Math.PI * 2) / ARENA_NUM_GAPS;
+  for (let i = 0; i < ARENA_NUM_GAPS; i++) {
+    const startArc = arenaAngle + i * sectorSize;
+    const endArc = startArc + (sectorSize - ARENA_GAP_ARC);
+
+    // Wall Arc
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ARENA_CX, ARENA_CY, ARENA_RADIUS, startArc, endArc);
+    ctx.lineWidth = 22;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#38bdf8';
+    ctx.shadowColor = '#0284c7';
+    ctx.shadowBlur = 24;
+    ctx.stroke();
+
+    // Secondary inner glow
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.restore();
+
+    // Flashing Warning Chevron in the Gap
+    const gapMidAngle = endArc + ARENA_GAP_ARC * 0.5;
+    const gx = ARENA_CX + Math.cos(gapMidAngle) * (ARENA_RADIUS + 8);
+    const gy = ARENA_CY + Math.sin(gapMidAngle) * (ARENA_RADIUS + 8);
+
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.rotate(gapMidAngle + Math.PI / 2);
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = '#dc2626';
+    ctx.shadowBlur = 12;
+    ctx.font = 'bold 18px Montserrat, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('▼ GAP ▼', 0, 0);
+    ctx.restore();
+  }
+
+  // 4 Orbit Pinball Bumpers
+  survivorObstacles.orbitBumpers.forEach(ob => {
+    const orbitAng = arenaAngle * 0.75 + ob.angleOffset;
+    const ox = ARENA_CX + Math.cos(orbitAng) * ob.dist;
+    const oy = ARENA_CY + Math.sin(orbitAng) * ob.dist;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ox, oy, ob.radius, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(ox, oy, 2, ox, oy, ob.radius);
+    grad.addColorStop(0, '#f472b6');
+    grad.addColorStop(1, '#db2777');
+    ctx.fillStyle = grad;
+    ctx.shadowColor = '#f472b6';
+    ctx.shadowBlur = 22;
+    ctx.fill();
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', ox, oy);
+    ctx.restore();
+  });
+
+  // Center Spinning Deflector Cross Blades
+  ctx.save();
+  const bladeLen = 150;
+  for (let b = 0; b < 4; b++) {
+    const bAngle = centerBladeAngle + (b * Math.PI * 2) / 4;
+    ctx.beginPath();
+    ctx.moveTo(ARENA_CX, ARENA_CY);
+    ctx.lineTo(ARENA_CX + Math.cos(bAngle) * bladeLen, ARENA_CY + Math.sin(bAngle) * bladeLen);
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = '#f59e0b';
+    ctx.shadowColor = '#d97706';
+    ctx.shadowBlur = 18;
+    ctx.stroke();
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Central Super Bumper
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(ARENA_CX, ARENA_CY, 55, 0, Math.PI * 2);
+  const cGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, 4, ARENA_CX, ARENA_CY, 55);
+  cGrad.addColorStop(0, '#fbbf24');
+  cGrad.addColorStop(1, '#ea580c');
+  ctx.fillStyle = cGrad;
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 28;
+  ctx.fill();
+
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 24px Montserrat, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💥', ARENA_CX, ARENA_CY);
+  ctx.restore();
+
+  ctx.restore();
 }
 
 // Render Track & Environment
 function drawTrackEnvironment(ctx) {
+  if (currentGameMode === 'circle_survivor') {
+    drawCircleSurvivorArena(ctx);
+    return;
+  }
+
   const L = 70;
   const R = V_WIDTH - 70;
 
@@ -983,21 +1434,25 @@ function drawShortsHUD() {
   ctx.textAlign = 'center';
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 15;
-  const regionTitle = (selectedContinent === 'All') ? "COUNTRY MARBLE RACE" : `${selectedContinent.toUpperCase()} MARBLE RACE`;
+  const isCircle = currentGameMode === 'circle_survivor';
+  const regionTitle = isCircle
+    ? (selectedContinent === 'All' ? "CIRCLE SURVIVOR: BATTLE ROYALE" : `${selectedContinent.toUpperCase()} CIRCLE SURVIVOR`)
+    : ((selectedContinent === 'All') ? "COUNTRY MARBLE RACE" : `${selectedContinent.toUpperCase()} MARBLE RACE`);
   ctx.fillText(regionTitle, V_WIDTH / 2, 65);
 
   ctx.font = '700 20px Inter, sans-serif';
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
-  const countLabel = (selectedContinent === 'All') ? "197 NATIONS" : `${marbles.length} NATIONS`;
+  const aliveCount = marbles.filter(m => !m.finished).length;
+  const countLabel = isCircle ? `${aliveCount} SURVIVORS REMAINING` : ((selectedContinent === 'All') ? "197 NATIONS" : `${marbles.length} NATIONS`);
   const diffBadge = (currentDifficulty === 'Easy') ? "🟢 EASY" : ((currentDifficulty === 'Hard') ? "🔴 HARD" : "🟡 NORMAL");
-  ctx.fillText(`${countLabel} • ${diffBadge} • WHO WINS?`, V_WIDTH / 2, 105);
+  ctx.fillText(`${countLabel} • ${diffBadge} • ${isCircle ? 'WHO SURVIVES?' : 'WHO WINS?'}`, V_WIDTH / 2, 105);
 
-  // Leader Indicator at the top right
+  // Leader Indicator at the top
   if (camera.leadMarble) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.beginPath();
-    ctx.roundRect(V_WIDTH / 2 - 200, 155, 400, 48, 24);
+    ctx.roundRect(V_WIDTH / 2 - 220, 155, 440, 48, 24);
     ctx.fill();
     ctx.strokeStyle = '#fbbf24';
     ctx.lineWidth = 2;
@@ -1006,7 +1461,8 @@ function drawShortsHUD() {
     ctx.font = '800 20px Inter, sans-serif';
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'center';
-    ctx.fillText(`🔥 CURRENT LEADER: ${camera.leadMarble.name}`, V_WIDTH / 2, 186);
+    const leaderLabel = isCircle ? `🛡️ LAST STAND: ${camera.leadMarble.name}` : `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
+    ctx.fillText(leaderLabel, V_WIDTH / 2, 186);
   }
 
   ctx.restore();
@@ -1061,7 +1517,8 @@ function drawCanvasWinnerOverlay() {
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 25;
   ctx.textAlign = 'center';
-  ctx.fillText('🏆 1ST PLACE CHAMPION! 🏆', V_WIDTH / 2, centerY - 230);
+  const championTitle = (currentGameMode === 'circle_survivor') ? '🏆 LAST SURVIVOR CHAMPION! 🏆' : '🏆 1ST PLACE CHAMPION! 🏆';
+  ctx.fillText(championTitle, V_WIDTH / 2, centerY - 230);
 
   // Giant Flag Texture (280x280 circular flag medal)
   const flagRadius = 145;
@@ -1105,7 +1562,10 @@ function drawCanvasWinnerOverlay() {
   ctx.font = '800 28px Inter, sans-serif';
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
-  ctx.fillText('🥇 OUTPACED 197 NATIONS & WON GOLD!', V_WIDTH / 2, centerY + 260);
+  const winSubtitle = (currentGameMode === 'circle_survivor')
+    ? `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`
+    : `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
+  ctx.fillText(winSubtitle, V_WIDTH / 2, centerY + 260);
 
   // YouTube Shorts Engagement Callout
   ctx.font = '700 24px Inter, sans-serif';
@@ -1114,6 +1574,28 @@ function drawCanvasWinnerOverlay() {
 
   ctx.restore();
 }
+
+// Game Mode Selection Buttons (Downhill Race vs Circle Survivor)
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const targetMode = btn.getAttribute('data-mode');
+    if (targetMode !== currentGameMode) {
+      currentGameMode = targetMode;
+      if (isRecording) {
+        stopRecording();
+      }
+      isRunning = false;
+      isPaused = false;
+      const startBtn = document.getElementById('startBtn');
+      if (startBtn) {
+        startBtn.innerText = currentGameMode === 'circle_survivor' ? '▶️ Drop Into Ring & Auto-Record' : '▶️ Drop Start Gate & Auto-Record';
+      }
+      initRace();
+    }
+  });
+});
 
 // Continent Selection Filter Buttons
 document.querySelectorAll('.continent-btn').forEach(btn => {
@@ -1142,7 +1624,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = '🔄 Restart Race & Record';
+    document.getElementById('startBtn').innerText = currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record';
     document.getElementById('pauseBtn').disabled = false;
 
     // 1-Click Auto-Record
@@ -1386,13 +1868,25 @@ function stopRecording() {
 let currentWinner = null;
 
 const VIRAL_TITLE_TEMPLATES = [
-  (ctx) => `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`,
-  (ctx) => `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`,
-  (ctx) => `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`,
-  (ctx) => `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`,
+  (ctx) => ctx.isCircle
+    ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
+    : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`,
+  (ctx) => ctx.isCircle
+    ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
+    : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`,
+  (ctx) => ctx.isCircle
+    ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
+    : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`,
+  (ctx) => ctx.isCircle
+    ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
+    : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`,
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
-  (ctx) => `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`,
-  (ctx) => `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`,
+  (ctx) => ctx.isCircle
+    ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
+    : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`,
+  (ctx) => ctx.isCircle
+    ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+    : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`,
   (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`
 ];
 
@@ -1417,6 +1911,7 @@ function generateShortsTitles(winner = null) {
   const winnerHighlight = winner ? `${winner.name.toUpperCase()} SHOCKED EVERYONE` : `YOU WON'T BELIEVE WHO WON`;
 
   const context = {
+    isCircle: currentGameMode === 'circle_survivor',
     regionName,
     winnerName,
     flagEmoji,
@@ -1459,15 +1954,19 @@ function updateVideoTitles(winner = null) {
   });
 
   // Update Description & Tags
+  const isCircle = currentGameMode === 'circle_survivor';
   const region = selectedContinent === "All" ? "All World (197 Nations)" : `${selectedContinent} (${currentGeneratedTitles.length > 0 ? currentGeneratedTitles[0].match(/(\d+)\s+Countries|\s+(\d+)\s+Nations/)?.[1] || 49 : 49} Flags)`;
-  const winText = winner ? `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will survive the 8 brutal obstacle stages?`;
-  const desc = `🏆 ${region} Downhill Marble Race Simulator!
+  const winText = winner 
+    ? (isCircle ? `🥇 Last Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `🥇 1st Place Winner: ${winner.name} ${getFlagEmoji(winner.code)}`)
+    : (isCircle ? `Who will survive the spinning ring hazards?` : `Who will survive the 8 brutal obstacle stages?`);
+  const modeTitle = isCircle ? "Circle Survivor Battle Royale Simulator" : "Downhill Marble Race Simulator";
+  const desc = `🏆 ${region} ${modeTitle}!
 ${winText}
 Difficulty: ${currentDifficulty} Preset
 
 Comment your country flag below! 👇
 
-#shorts #marblerace #flagsbattle #geography #countryballs #worldflags #gaming #viral`;
+#shorts #marblerace #flagsbattle #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral`;
 
   const tagsBox = document.getElementById('videoTagsBox');
   if (tagsBox) tagsBox.value = desc;

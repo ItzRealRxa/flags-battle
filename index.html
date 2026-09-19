@@ -59,17 +59,32 @@
     <!-- Center Panel: Tournament Config & Finish Log -->
     <div class="side-panel">
 
-      <!-- Live Race Status -->
+      <!-- Game Mode Selector -->
+      <div class="card game-mode-card">
+        <div class="card-title">🎮 Game Mode</div>
+        <div class="game-mode-grid">
+          <button class="mode-btn active" data-mode="race">
+            <span class="mode-icon">🏁</span>
+            <span>Downhill Race</span>
+          </button>
+          <button class="mode-btn" data-mode="circle_survivor">
+            <span class="mode-icon">⭕</span>
+            <span>Circle Survivor</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Race / Battle Status -->
       <div class="card">
-        <div class="card-title">🏎️ Live Race Status</div>
+        <div class="card-title" id="statusCardTitle">🏎️ Live Race Status</div>
         <div class="stats-grid">
           <div class="stat-box">
             <div id="aliveCount" class="stat-val alive">197</div>
-            <div class="stat-lbl">Racing</div>
+            <div class="stat-lbl" id="aliveCountLabel">Racing</div>
           </div>
           <div class="stat-box">
             <div id="eliminatedCount" class="stat-val" style="color: #fbbf24;">0</div>
-            <div class="stat-lbl">🏁 Finished</div>
+            <div class="stat-lbl" id="eliminatedCountLabel">🏁 Finished</div>
           </div>
         </div>
         <div class="mvp-box">

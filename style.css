@@ -713,10 +713,50 @@ body {
   transition: width 0.1s ease;
 }
 
+/* Game Mode Selector */
+.game-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mode-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 10px 8px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
+}
+
+.mode-btn.active {
+  background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.5);
+  color: #ffffff;
+}
+
+.mode-icon {
+  font-size: 1.1rem;
+}
+
 /* Continent Selection Chips */
 .continent-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-top: 4px;
 }
