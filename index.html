@@ -36,6 +36,24 @@
         <button id="restartModalBtn" class="btn" style="padding: 12px 28px;">🏁 Race Again</button>
       </div>
 
+      <!-- Video Playback & Save Modal (iPhone & Mobile Friendly) -->
+      <div id="videoModal" class="video-modal">
+        <div class="video-modal-card">
+          <div class="video-modal-header">
+            <span class="video-modal-title">🎉 Shorts Video Ready!</span>
+            <button id="closeVideoModalBtn" class="close-modal-btn">✕</button>
+          </div>
+          <div class="video-preview-wrapper">
+            <video id="videoPreviewPlayer" playsinline controls autoplay loop></video>
+          </div>
+          <div class="video-modal-actions">
+            <button id="shareVideoBtn" class="btn btn-hero">📲 Save Video to Photos</button>
+            <button id="directDownloadBtn" class="btn btn-secondary">💾 Direct Download</button>
+          </div>
+          <div class="video-modal-hint">💡 Tap "Save Video" to save straight into your iPhone Photos Camera Roll!</div>
+        </div>
+      </div>
+
     </div>
 
     <!-- Center Panel: Tournament Config & Finish Log -->

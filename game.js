@@ -1097,54 +1097,99 @@ recordBtn.addEventListener('click', () => {
   }
 });
 
+let currentVideoBlob = null;
+let currentVideoUrl = null;
+let currentVideoFilename = '';
+
+function getSupportedMimeType() {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  // iOS Safari strictly requires video/mp4 (H.264)
+  if (isIOS) {
+    const iosTypes = ['video/mp4;codecs=avc1', 'video/mp4', 'video/quicktime'];
+    for (const t of iosTypes) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
+    }
+  }
+
+  const preferredTypes = [
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=h264',
+    'video/mp4',
+    'video/webm;codecs=h264',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
+  ];
+
+  for (const t of preferredTypes) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
 function startRecording() {
   try {
-    const stream = canvas.captureStream(60);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 800;
+    const fps = isMobile ? 30 : 60; // 30fps ensures mobile GPU encoder doesn't drop frames or fail
+    const stream = canvas.captureStream ? canvas.captureStream(fps) : null;
     recordedChunks = [];
 
-    // Prioritize MP4 formats (H.264 / AVC1) supported by Chromium & Safari
-    const preferredTypes = [
-      'video/mp4;codecs=avc1',
-      'video/mp4;codecs=h264',
-      'video/mp4',
-      'video/webm;codecs=h264',
-      'video/webm;codecs=vp9',
-      'video/webm'
-    ];
-
-    let chosenMime = '';
-    for (const type of preferredTypes) {
-      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-        chosenMime = type;
-        break;
-      }
-    }
-
+    const chosenMime = getSupportedMimeType();
     const options = chosenMime ? { mimeType: chosenMime } : {};
     mediaRecorder = new MediaRecorder(stream, options);
+    
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) recordedChunks.push(e.data);
     };
+
     mediaRecorder.onstop = () => {
       clearInterval(recTimerInterval);
       if (recDot) recDot.classList.remove('active');
       if (recStatusText) recStatusText.innerText = 'STANDBY • 1080x1920 MP4 60FPS';
       recordBtn.classList.remove('recording');
-      recordBtn.innerText = '⏺️ Start Recording Short (.MP4)';
+      recordBtn.innerText = '⏺️ Start Recording Short';
 
-      const blobType = chosenMime.includes('mp4') ? chosenMime : 'video/mp4';
-      const blob = new Blob(recordedChunks, { type: blobType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Country_Marble_Race_${selectedContinent}_${Date.now()}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Determine container and extension
+      const isMp4 = chosenMime.includes('mp4') || chosenMime.includes('quicktime');
+      const mimeType = isMp4 ? 'video/mp4' : 'video/webm';
+      const ext = isMp4 ? 'mp4' : 'webm';
+
+      currentVideoBlob = new Blob(recordedChunks, { type: mimeType });
+      if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+      currentVideoUrl = URL.createObjectURL(currentVideoBlob);
+      currentVideoFilename = `Country_Marble_Race_${selectedContinent}_${Date.now()}.${ext}`;
+
+      // Update in-page video player
+      const player = document.getElementById('videoPreviewPlayer');
+      if (player) {
+        player.src = currentVideoUrl;
+        player.load();
+        player.play().catch(() => {});
+      }
+
+      // Show Video Modal
+      const modal = document.getElementById('videoModal');
+      if (modal) modal.classList.add('active');
+
+      // Trigger mobile share sheet if on mobile (Native iOS "Save Video" to Camera Roll)
+      if (isMobile && navigator.canShare) {
+        const file = new File([currentVideoBlob], currentVideoFilename, { type: mimeType });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: 'Country Marble Race Short',
+            text: '🏆 YouTube Shorts Marble Race'
+          }).catch(() => {});
+        }
+      } else if (!isMobile) {
+        // On Desktop, trigger direct download
+        triggerDirectDownload();
+      }
     };
 
-    mediaRecorder.start();
+    mediaRecorder.start(1000); // 1-second chunks ensure buffer flushes reliably on mobile
     isRecording = true;
     recSeconds = 0;
     updateRecTimerUI();
@@ -1154,13 +1199,51 @@ function startRecording() {
     }, 1000);
 
     if (recDot) recDot.classList.add('active');
-    if (recStatusText) recStatusText.innerText = 'RECORDING MP4 60FPS HD';
+    if (recStatusText) recStatusText.innerText = 'RECORDING 60FPS HD';
     recordBtn.classList.add('recording');
-    recordBtn.innerText = '⏹️ Stop & Save .MP4';
+    recordBtn.innerText = '⏹️ Stop & Save Video';
   } catch (err) {
     alert("Recording failed: " + err.message);
   }
 }
+
+function triggerDirectDownload() {
+  if (!currentVideoUrl) return;
+  const a = document.createElement('a');
+  a.href = currentVideoUrl;
+  a.download = currentVideoFilename || `Country_Marble_Race_${Date.now()}.mp4`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+document.getElementById('directDownloadBtn')?.addEventListener('click', () => {
+  triggerDirectDownload();
+});
+
+document.getElementById('shareVideoBtn')?.addEventListener('click', () => {
+  if (!currentVideoBlob) return;
+  const mimeType = currentVideoBlob.type || 'video/mp4';
+  const file = new File([currentVideoBlob], currentVideoFilename, { type: mimeType });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({
+      files: [file],
+      title: 'Country Marble Race Short',
+      text: '🏆 YouTube Shorts Marble Race'
+    }).catch(() => {
+      triggerDirectDownload();
+    });
+  } else {
+    triggerDirectDownload();
+  }
+});
+
+document.getElementById('closeVideoModalBtn')?.addEventListener('click', () => {
+  const modal = document.getElementById('videoModal');
+  if (modal) modal.classList.remove('active');
+  const player = document.getElementById('videoPreviewPlayer');
+  if (player) player.pause();
+});
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
