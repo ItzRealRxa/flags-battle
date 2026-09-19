@@ -20,6 +20,8 @@ let particles = [];
 let isRunning = false;
 let isPaused = false;
 let gateOpen = false;
+let isRecording = false;
+let mediaRecorder = null;
 
 // Dynamic Camera
 const camera = {
@@ -146,11 +148,13 @@ class Marble {
         showWinnerBanner(this);
         if (typeof updateVideoTitles === 'function') updateVideoTitles(this);
 
-        const autoStop = document.getElementById('autoStopRec');
-        if (autoStop && autoStop.checked && isRecording) {
+        // Always stop recording when 1st place finishes!
+        if (isRecording) {
           setTimeout(() => {
-            if (isRecording) stopRecording();
-          }, 4200); // Capture winner celebration footage
+            if (isRecording && typeof stopRecording === 'function') {
+              stopRecording();
+            }
+          }, 1800); // 1.8s of photo finish and winner banner, then auto-stop!
         }
       }
       updateLeaderboardUI();
@@ -1077,9 +1081,7 @@ const recordBtn = document.getElementById('recordBtn');
 const recDot = document.getElementById('recDot');
 const recStatusText = document.getElementById('recStatusText');
 const recTimer = document.getElementById('recTimer');
-let mediaRecorder = null;
 let recordedChunks = [];
-let isRecording = false;
 let recTimerInterval = null;
 let recSeconds = 0;
 
