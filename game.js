@@ -69,6 +69,12 @@ let blackHoleVortexTime = 0;
 const BLACK_HOLE_EVENT_HORIZON = 52;
 let accretionDiskAngle = 0;
 
+// Lava Rising Mode Specs
+let lavaLevel = 1840;
+let lavaSpeed = 38;
+let lavaTime = 0;
+let lavaPlatforms = [];
+
 // Track Obstacles
 let walls = [];
 let pegs = [];
@@ -703,7 +709,58 @@ function initRace() {
   }
 
   // Setup mode-specific layout
-  if (currentGameMode === 'black_hole') {
+  if (currentGameMode === 'lava_rising') {
+    // LAVA RISING: Initialize floating platforms and spawn marbles across caldera tiers
+    lavaLevel = 1860;
+    lavaTime = 0;
+    lavaSpeed = (currentDifficulty === 'Easy' ? 26 : (currentDifficulty === 'Hard' ? 44 : 34));
+
+    lavaPlatforms = [
+      { y: 1650, x: 180, w: 290, h: 24, minX: 110, maxX: 340, speed: 2.0, dir: 1 },
+      { y: 1650, x: 610, w: 290, h: 24, minX: 470, maxX: 700, speed: -2.2, dir: -1 },
+
+      { y: 1470, x: 120, w: 230, h: 24, minX: 90, maxX: 260, speed: 2.5, dir: 1 },
+      { y: 1470, x: 430, w: 220, h: 24, minX: 340, maxX: 520, speed: -2.6, dir: -1 },
+      { y: 1470, x: 730, w: 230, h: 24, minX: 620, maxX: 780, speed: 2.4, dir: 1 },
+
+      { y: 1290, x: 220, w: 300, h: 24, minX: 130, maxX: 380, speed: -2.8, dir: -1 },
+      { y: 1290, x: 570, w: 300, h: 24, minX: 450, maxX: 690, speed: 2.6, dir: 1 },
+
+      { y: 1110, x: 140, w: 230, h: 24, minX: 90, maxX: 290, speed: 3.0, dir: 1 },
+      { y: 1110, x: 440, w: 210, h: 24, minX: 350, maxX: 530, speed: -3.2, dir: -1 },
+      { y: 1110, x: 720, w: 230, h: 24, minX: 610, maxX: 770, speed: 2.8, dir: 1 },
+
+      { y: 930, x: 200, w: 290, h: 24, minX: 110, maxX: 380, speed: -2.7, dir: -1 },
+      { y: 930, x: 590, w: 290, h: 24, minX: 460, maxX: 710, speed: 3.1, dir: 1 },
+
+      { y: 750, x: 140, w: 230, h: 24, minX: 90, maxX: 280, speed: 3.2, dir: 1 },
+      { y: 750, x: 430, w: 220, h: 24, minX: 340, maxX: 520, speed: -3.0, dir: -1 },
+      { y: 750, x: 720, w: 230, h: 24, minX: 610, maxX: 780, speed: 3.3, dir: 1 },
+
+      { y: 570, x: 240, w: 290, h: 24, minX: 130, maxX: 400, speed: -3.4, dir: -1 },
+      { y: 570, x: 550, w: 290, h: 24, minX: 430, maxX: 690, speed: 3.2, dir: 1 },
+
+      { y: 390, x: 370, w: 340, h: 26, minX: 250, maxX: 490, speed: 2.5, dir: 1 } // Peak Platform
+    ];
+
+    const total = targetCountries.length;
+    const shuffled = [...targetCountries].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((country, i) => {
+      // Distribute across platforms
+      const plat = lavaPlatforms[i % lavaPlatforms.length];
+      const px = plat.x + 20 + Math.random() * (plat.w - 40);
+      const py = plat.y - 25 - Math.random() * 60;
+      const m = new Marble(country, px, py);
+      m.vx = (Math.random() - 0.5) * 5;
+      m.vy = -5 - Math.random() * 6; // Initial small bounce
+      marbles.push(m);
+    });
+
+    camera.y = 0;
+    camera.targetY = 0;
+    camera.leadMarble = marbles[0] || null;
+  } else if (currentGameMode === 'black_hole') {
     // BLACK HOLE VORTEX: Spawn in outer cosmic orbital disk with angular momentum
     blackHoleVortexTime = 0;
     const total = targetCountries.length;
@@ -1335,8 +1392,158 @@ function handleBlackHolePhysics() {
   }
 }
 
+// Lava Rising / Volcano Floor Physics Engine
+function handleLavaRisingPhysics() {
+  lavaTime += 0.016;
+  lavaLevel -= lavaSpeed * 0.016;
+
+  // Move Floating Caldera Platforms Horizontally
+  lavaPlatforms.forEach(p => {
+    p.x += p.speed;
+    if (p.x < p.minX) {
+      p.x = p.minX;
+      p.speed = Math.abs(p.speed);
+    } else if (p.x > p.maxX) {
+      p.x = p.maxX;
+      p.speed = -Math.abs(p.speed);
+    }
+  });
+
+  // Spatial Marble-to-Marble Collisions
+  marbles.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < marbles.length; i++) {
+    const m1 = marbles[i];
+    if (m1.finished) continue;
+
+    for (let j = i + 1; j < marbles.length; j++) {
+      const m2 = marbles[j];
+      if (m2.finished) continue;
+      if (m2.y - m1.y > m1.radius + m2.radius) break;
+
+      const dx = m2.x - m1.x;
+      const dy = m2.y - m1.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = m1.radius + m2.radius;
+
+      if (dist < minDist && dist > 0) {
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        m1.x -= nx * overlap * 0.5;
+        m1.y -= ny * overlap * 0.5;
+        m2.x += nx * overlap * 0.5;
+        m2.y += ny * overlap * 0.5;
+
+        const kx = m1.vx - m2.vx;
+        const ky = m1.vy - m2.vy;
+        const p = 2 * (nx * kx + ny * ky) / (m1.mass + m2.mass);
+
+        m1.vx -= p * m2.mass * nx;
+        m1.vy -= p * m2.mass * ny;
+        m2.vx += p * m1.mass * nx;
+        m2.vy += p * m1.mass * ny;
+
+        if (Math.hypot(kx, ky) > 3) {
+          sfx.playMarbleClink(0.3);
+        }
+      }
+    }
+
+    // Caldera Gravity & Air Drag
+    m1.vy += 0.42;
+    m1.vx *= 0.992;
+    m1.vy *= 0.995;
+
+    m1.x += m1.vx;
+    m1.y += m1.vy;
+
+    // Outer Volcanic Wall Rebound
+    const minWallX = 90 + m1.radius;
+    const maxWallX = 990 - m1.radius;
+    if (m1.x < minWallX) {
+      m1.x = minWallX;
+      m1.vx = -m1.vx * 0.75;
+      sfx.playMarbleClink(0.35);
+    } else if (m1.x > maxWallX) {
+      m1.x = maxWallX;
+      m1.vx = -m1.vx * 0.75;
+      sfx.playMarbleClink(0.35);
+    }
+
+    // Top ceiling limit
+    if (m1.y < 220) {
+      m1.y = 220;
+      m1.vy = Math.abs(m1.vy) * 0.5;
+    }
+
+    // Platform Bounce Dynamics
+    lavaPlatforms.forEach(p => {
+      if (m1.vy > 0 &&
+          m1.x >= p.x - m1.radius && m1.x <= p.x + p.w + m1.radius &&
+          m1.y + m1.radius >= p.y && m1.y - m1.radius <= p.y + p.h) {
+        m1.y = p.y - m1.radius;
+        m1.vy = -19.5 - Math.random() * 4.0; // High explosive bounce
+        m1.vx += p.speed * 0.7 + (Math.random() - 0.5) * 4;
+        sfx.playBumper();
+        createCelebration(m1.x, m1.y);
+      }
+    });
+
+    // Speed trail for highest peak leader
+    if (m1 === camera.leadMarble && Math.hypot(m1.vx, m1.vy) > 3) {
+      m1.trail.unshift({ x: m1.x, y: m1.y, alpha: 1 });
+      if (m1.trail.length > 8) m1.trail.pop();
+    } else if (m1.trail.length > 0) {
+      m1.trail.pop();
+    }
+
+    // Molten Magma Vaporization Check!
+    if (m1.y + m1.radius >= lavaLevel && !m1.finished) {
+      m1.finished = true;
+      finishedMarbles.push(m1);
+      sfx.playBumper();
+
+      // Fiery explosion sparks
+      createCelebration(m1.x, m1.y);
+      const fireColors = ['#f97316', '#ef4444', '#f59e0b', '#78716c', '#ffffff'];
+      for (let p = 0; p < 30; p++) {
+        particles.push(new Particle(m1.x, m1.y, fireColors[p % fireColors.length], 13));
+      }
+
+      const alive = marbles.filter(m => !m.finished);
+      m1.finishRank = alive.length + 1;
+      addFeedItem(`🌋 MELTED IN LAVA: ${m1.name} (${alive.length} Left)`, '#f97316');
+
+      // Check Victory (Last Nation Standing above Magma!)
+      if (alive.length === 1 && !winnerMarble) {
+        winnerMarble = alive[0];
+        winnerMarble.finished = true;
+        winnerMarble.finishRank = 1;
+        sfx.playVictory();
+        createCelebration(winnerMarble.x, winnerMarble.y);
+        showWinnerBanner(winnerMarble);
+        if (typeof updateVideoTitles === 'function') updateVideoTitles(winnerMarble);
+
+        if (isRecording) {
+          setTimeout(() => {
+            if (isRecording && typeof stopRecording === 'function') {
+              stopRecording();
+            }
+          }, 3500);
+        }
+      }
+      updateLeaderboardUI();
+    }
+  }
+}
+
 // Physics & Collision Handling
 function handlePhysics() {
+  if (currentGameMode === 'lava_rising') {
+    handleLavaRisingPhysics();
+    return;
+  }
   if (currentGameMode === 'black_hole') {
     handleBlackHolePhysics();
     return;
@@ -1521,6 +1728,19 @@ function handlePhysics() {
 
 // Track Leader & Update Action Camera
 function updateCamera() {
+  if (currentGameMode === 'lava_rising') {
+    camera.targetY = 0;
+    camera.y = 0;
+    // In Lava Rising, the leader is the highest marble surviving above magma (smallest y)
+    const active = marbles.filter(m => !m.finished);
+    if (active.length > 0) {
+      active.sort((a, b) => a.y - b.y);
+      camera.leadMarble = active[0];
+    } else {
+      camera.leadMarble = finishedMarbles[finishedMarbles.length - 1] || null;
+    }
+    return;
+  }
   if (currentGameMode === 'black_hole') {
     camera.targetY = 0;
     camera.y = 0;
@@ -1632,7 +1852,8 @@ function showWinnerBanner(winner) {
   flagImg.src = getFlagUrl(winner.code);
   nameElem.innerText = winner.name;
   let stats = `🏆 OUTPACED 197 NATIONS & WON 1ST PLACE!`;
-  if (currentGameMode === 'black_hole') stats = `🏆 SINGULARITY SURVIVOR: ESCAPED THE EVENT HORIZON!`;
+  if (currentGameMode === 'lava_rising') stats = `🏆 VOLCANO CHAMPION: ESCAPED THE RISING MAGMA!`;
+  else if (currentGameMode === 'black_hole') stats = `🏆 SINGULARITY SURVIVOR: ESCAPED THE EVENT HORIZON!`;
   else if (currentGameMode === 'bomb_tag') stats = `🏆 HOT POTATO CHAMPION: SURVIVED ALL EXPLOSIONS!`;
   else if (currentGameMode === 'circle_survivor') stats = `🏆 OUTLASTED ${marbles.length} NATIONS & BECAME LAST SURVIVOR!`;
   else if (currentGameMode === 'concentric_rings') stats = `🏆 FIRST NATION TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
@@ -2044,8 +2265,130 @@ function drawBlackHoleArena(ctx) {
   ctx.restore();
 }
 
+// Render Lava Rising / Volcano Caldera Arena
+function drawLavaArena(ctx) {
+  ctx.save();
+
+  // Dark Volcanic Obsidian Caldera Backdrop
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, TRACK_HEIGHT);
+  bgGrad.addColorStop(0, '#1c0a00');
+  bgGrad.addColorStop(0.3, '#0c0502');
+  bgGrad.addColorStop(0.7, '#150602');
+  bgGrad.addColorStop(1, '#2a0a00');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, V_WIDTH, TRACK_HEIGHT);
+
+  // Volcanic Caldera Wall Rails (Left & Right Glowing Lava Basalt)
+  ctx.save();
+  ctx.lineWidth = 14;
+  ctx.strokeStyle = '#ea580c';
+  ctx.shadowColor = '#c2410c';
+  ctx.shadowBlur = 22;
+  ctx.beginPath();
+  ctx.moveTo(90, 180);
+  ctx.lineTo(90, TRACK_HEIGHT);
+  ctx.moveTo(990, 180);
+  ctx.lineTo(990, TRACK_HEIGHT);
+  ctx.stroke();
+  ctx.restore();
+
+  // Top Caldera Rim Ceiling
+  ctx.save();
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#f59e0b';
+  ctx.shadowColor = '#d97706';
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  ctx.moveTo(90, 200);
+  ctx.lineTo(990, 200);
+  ctx.stroke();
+  ctx.restore();
+
+  // Draw Floating Caldera Bounce Platforms
+  lavaPlatforms.forEach((p, idx) => {
+    // Only draw platforms that are above or partially above the rising lava
+    if (p.y > lavaLevel + 40) return;
+
+    ctx.save();
+    // Platform Drop Shadow & Heat Glow
+    ctx.shadowColor = '#f97316';
+    ctx.shadowBlur = 18;
+
+    // Platform Body (Dark Obsidian Stone)
+    const platGrad = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.h);
+    platGrad.addColorStop(0, '#334155');
+    platGrad.addColorStop(0.5, '#1e293b');
+    platGrad.addColorStop(1, '#0f172a');
+    ctx.fillStyle = platGrad;
+    ctx.beginPath();
+    ctx.roundRect(p.x, p.y, p.w, p.h, 12);
+    ctx.fill();
+
+    // Glowing Neon Hazard Top Border
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = idx === lavaPlatforms.length - 1 ? '#fbbf24' : '#f97316';
+    ctx.stroke();
+
+    // Platform Hazard Chevron / Arrow Patterns
+    ctx.fillStyle = idx === lavaPlatforms.length - 1 ? 'rgba(251, 191, 36, 0.8)' : 'rgba(249, 115, 22, 0.65)';
+    ctx.font = 'bold 12px Montserrat, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = idx === lavaPlatforms.length - 1 ? '👑 HIGHEST PEAK 👑' : '▲ BOUNCE ▲';
+    ctx.fillText(label, p.x + p.w / 2, p.y + p.h / 2);
+
+    ctx.restore();
+  });
+
+  // Render Rising Molten Magma
+  ctx.save();
+  const magmaGrad = ctx.createLinearGradient(0, lavaLevel - 15, 0, TRACK_HEIGHT);
+  magmaGrad.addColorStop(0, '#fef08a'); // Sizzling bright yellow crest
+  magmaGrad.addColorStop(0.08, '#f97316'); // Fiery orange
+  magmaGrad.addColorStop(0.35, '#dc2626'); // Scorching red
+  magmaGrad.addColorStop(1, '#450a0a'); // Deep magma abyss
+
+  ctx.fillStyle = magmaGrad;
+  ctx.shadowColor = '#ea580c';
+  ctx.shadowBlur = 40;
+
+  // Undulating Magma Wave Crest
+  ctx.beginPath();
+  ctx.moveTo(0, TRACK_HEIGHT);
+  ctx.lineTo(0, lavaLevel);
+
+  for (let x = 0; x <= V_WIDTH; x += 15) {
+    const wave1 = Math.sin(x * 0.018 + lavaTime * 4.2) * 9;
+    const wave2 = Math.cos(x * 0.032 - lavaTime * 3.1) * 6;
+    ctx.lineTo(x, lavaLevel + wave1 + wave2);
+  }
+
+  ctx.lineTo(V_WIDTH, TRACK_HEIGHT);
+  ctx.closePath();
+  ctx.fill();
+
+  // Floating Magma Flame & Ember Bursts
+  ctx.fillStyle = '#ffffff';
+  for (let b = 0; b < 12; b++) {
+    const bx = ((b * 89 + lavaTime * 80) % (V_WIDTH - 200)) + 100;
+    const by = lavaLevel - 12 - (Math.sin(lavaTime * 6 + b) * 16);
+    ctx.beginPath();
+    ctx.arc(bx, by, 3 + (b % 4), 0, Math.PI * 2);
+    ctx.fillStyle = b % 2 === 0 ? '#fbbf24' : '#ef4444';
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  ctx.restore();
+}
+
 // Render Track & Environment
 function drawTrackEnvironment(ctx) {
+  if (currentGameMode === 'lava_rising') {
+    drawLavaArena(ctx);
+    return;
+  }
   if (currentGameMode === 'black_hole') {
     drawBlackHoleArena(ctx);
     return;
@@ -2321,7 +2664,9 @@ function drawShortsHUD() {
   ctx.shadowColor = '#f59e0b';
   ctx.shadowBlur = 15;
   let regionTitle = "COUNTRY MARBLE RACE";
-  if (currentGameMode === 'black_hole') {
+  if (currentGameMode === 'lava_rising') {
+    regionTitle = (selectedContinent === 'All' ? "LAVA RISING: VOLCANO" : `${selectedContinent.toUpperCase()} LAVA RISING`);
+  } else if (currentGameMode === 'black_hole') {
     regionTitle = (selectedContinent === 'All' ? "BLACK HOLE VORTEX" : `${selectedContinent.toUpperCase()} BLACK HOLE`);
   } else if (currentGameMode === 'bomb_tag') {
     regionTitle = (selectedContinent === 'All' ? "BOMB TAG: HOT POTATO" : `${selectedContinent.toUpperCase()} BOMB TAG`);
@@ -2339,7 +2684,9 @@ function drawShortsHUD() {
   ctx.shadowBlur = 0;
   const aliveCount = marbles.filter(m => !m.finished).length;
   let countLabel = `${marbles.length} NATIONS`;
-  if (currentGameMode === 'black_hole') {
+  if (currentGameMode === 'lava_rising') {
+    countLabel = `${aliveCount} SURVIVORS • LAVA RISE: ${Math.round(1860 - lavaLevel)}px`;
+  } else if (currentGameMode === 'black_hole') {
     countLabel = `${aliveCount} IN ORBIT • GRAVITY: ${(1 + blackHoleVortexTime * 0.025).toFixed(1)}x`;
   } else if (currentGameMode === 'bomb_tag') {
     countLabel = `${aliveCount} SURVIVORS • DETONATION: ${Math.max(0, bombTimer).toFixed(1)}s`;
@@ -2367,7 +2714,8 @@ function drawShortsHUD() {
     ctx.fillStyle = '#fbbf24';
     ctx.textAlign = 'center';
     let leaderLabel = `🔥 CURRENT LEADER: ${camera.leadMarble.name}`;
-    if (currentGameMode === 'black_hole') leaderLabel = `🪐 SAFEST ORBIT: ${camera.leadMarble.name}`;
+    if (currentGameMode === 'lava_rising') leaderLabel = `⛰️ HIGHEST PEAK: ${camera.leadMarble.name}`;
+    else if (currentGameMode === 'black_hole') leaderLabel = `🪐 SAFEST ORBIT: ${camera.leadMarble.name}`;
     else if (currentGameMode === 'bomb_tag') leaderLabel = `💣 TICKING BOMB: ${bombCarrier ? bombCarrier.name : 'None'} (${Math.max(0, bombTimer).toFixed(1)}s)`;
     else if (currentGameMode === 'circle_survivor') leaderLabel = `🛡️ LAST STAND: ${camera.leadMarble.name}`;
     else if (currentGameMode === 'concentric_rings') leaderLabel = `🎯 CLOSEST TO CORE: ${camera.leadMarble.name}`;
@@ -2427,7 +2775,8 @@ function drawCanvasWinnerOverlay() {
   ctx.shadowBlur = 25;
   ctx.textAlign = 'center';
   let championTitle = '🏆 1ST PLACE CHAMPION! 🏆';
-  if (currentGameMode === 'black_hole') championTitle = '🌪️ SINGULARITY SURVIVOR! 🌪️';
+  if (currentGameMode === 'lava_rising') championTitle = '🌋 VOLCANO SURVIVOR CHAMPION! 🌋';
+  else if (currentGameMode === 'black_hole') championTitle = '🌪️ SINGULARITY SURVIVOR! 🌪️';
   else if (currentGameMode === 'bomb_tag') championTitle = '💣 HOT POTATO CHAMPION! 💣';
   else if (currentGameMode === 'circle_survivor') championTitle = '🏆 LAST SURVIVOR CHAMPION! 🏆';
   else if (currentGameMode === 'concentric_rings') championTitle = '🏆 RING MAZE CHAMPION! 🏆';
@@ -2476,7 +2825,8 @@ function drawCanvasWinnerOverlay() {
   ctx.fillStyle = '#38bdf8';
   ctx.shadowBlur = 0;
   let winSubtitle = `🥇 OUTPACED 197 NATIONS & WON GOLD!`;
-  if (currentGameMode === 'black_hole') winSubtitle = `🥇 ESCAPED THE EVENT HORIZON & SURVIVED THE VOID!`;
+  if (currentGameMode === 'lava_rising') winSubtitle = `🥇 OUTLASTED THE RISING MAGMA & CONQUERED THE PEAK!`;
+  else if (currentGameMode === 'black_hole') winSubtitle = `🥇 ESCAPED THE EVENT HORIZON & SURVIVED THE VOID!`;
   else if (currentGameMode === 'bomb_tag') winSubtitle = `🥇 DODGED ALL TNT DETONATIONS & WON HOT POTATO!`;
   else if (currentGameMode === 'circle_survivor') winSubtitle = `🥇 OUTLASTED ${marbles.length} NATIONS IN THE RING!`;
   else if (currentGameMode === 'concentric_rings') winSubtitle = `🥇 FIRST TO PENETRATE ALL 4 RINGS & REACH THE CORE!`;
@@ -2490,7 +2840,7 @@ function drawCanvasWinnerOverlay() {
   ctx.restore();
 }
 
-// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings vs Bomb Tag vs Black Hole)
+// Game Mode Selection Buttons (Downhill Race vs Circle Survivor vs Concentric Rings vs Bomb Tag vs Black Hole vs Lava Rising)
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -2505,7 +2855,9 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       isPaused = false;
       const startBtn = document.getElementById('startBtn');
       if (startBtn) {
-        if (currentGameMode === 'black_hole') {
+        if (currentGameMode === 'lava_rising') {
+          startBtn.innerText = '▶️ Start Volcano & Auto-Record';
+        } else if (currentGameMode === 'black_hole') {
           startBtn.innerText = '▶️ Start Vortex & Auto-Record';
         } else if (currentGameMode === 'bomb_tag') {
           startBtn.innerText = '▶️ Start Bomb Tag & Auto-Record';
@@ -2549,13 +2901,15 @@ document.getElementById('startBtn').addEventListener('click', () => {
     isRunning = true;
     isPaused = false;
     gateOpen = true; // Drop start gate!
-    document.getElementById('startBtn').innerText = currentGameMode === 'black_hole'
-      ? '🔄 Restart Vortex & Record'
-      : (currentGameMode === 'bomb_tag'
-        ? '🔄 Restart Bomb Tag & Record'
-        : (currentGameMode === 'concentric_rings' 
-          ? '🔄 Restart Maze & Record' 
-          : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record')));
+    document.getElementById('startBtn').innerText = currentGameMode === 'lava_rising'
+      ? '🔄 Restart Volcano & Record'
+      : (currentGameMode === 'black_hole'
+        ? '🔄 Restart Vortex & Record'
+        : (currentGameMode === 'bomb_tag'
+          ? '🔄 Restart Bomb Tag & Record'
+          : (currentGameMode === 'concentric_rings' 
+            ? '🔄 Restart Maze & Record' 
+            : (currentGameMode === 'circle_survivor' ? '🔄 Restart Battle & Record' : '🔄 Restart Race & Record'))));
     document.getElementById('pauseBtn').disabled = false;
 
     // 1-Click Auto-Record
@@ -2799,67 +3153,79 @@ function stopRecording() {
 let currentWinner = null;
 
 const VIRAL_TITLE_TEMPLATES = [
-  (ctx) => ctx.mode === 'black_hole'
-    ? `🌪️ ${ctx.flagEmoji} ${ctx.count} Countries Sucked Into A Cosmic BLACK HOLE Singularity! 🌌 #shorts #blackhole`
-    : (ctx.mode === 'bomb_tag'
-      ? `💣 ${ctx.flagEmoji} ${ctx.count} Countries Pass The Ticking TNT: Who Explodes?! 💥 #shorts #bombtag`
-      : (ctx.mode === 'concentric_rings'
-        ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
-        : (ctx.mode === 'circle_survivor'
-          ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
-          : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `🌋 ${ctx.flagEmoji} ${ctx.count} Countries In THE FLOOR IS LAVA: Rising Magma Chaos! 🔥 #shorts #lavarising`
+    : (ctx.mode === 'black_hole'
+      ? `🌪️ ${ctx.flagEmoji} ${ctx.count} Countries Sucked Into A Cosmic BLACK HOLE Singularity! 🌌 #shorts #blackhole`
+      : (ctx.mode === 'bomb_tag'
+        ? `💣 ${ctx.flagEmoji} ${ctx.count} Countries Pass The Ticking TNT: Who Explodes?! 💥 #shorts #bombtag`
+        : (ctx.mode === 'concentric_rings'
+          ? `🌀 ${ctx.flagEmoji} ${ctx.count} Countries In The 4-Ring Maze: Who Penetrates The Golden Core?! 🏆 #shorts #ringmaze`
+          : (ctx.mode === 'circle_survivor'
+            ? `⭕ ${ctx.flagEmoji} ${ctx.count} Countries In The Spinning Death Circle... ONLY 1 SURVIVES! 🏆 #shorts #battleroyale`
+            : `🔥 ${ctx.flagEmoji} ${ctx.count} Countries Downhill Marble Race: Who Takes 1st Place?! 🏆 #shorts #marblerace`)))),
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `😱 ${ctx.winnerHighlight} Escaped The Event Horizon In The ${ctx.regionName} Black Hole! 🌪️ #flagsbattle`
-    : (ctx.mode === 'bomb_tag'
-      ? `😱 ${ctx.winnerHighlight} In The Most Insane Hot Potato Bomb Battle! 💣 #flagsbattle`
-      : (ctx.mode === 'concentric_rings'
-        ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
-        : (ctx.mode === 'circle_survivor'
-          ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
-          : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `😱 ${ctx.winnerHighlight} Outclimbed The Magma In The ${ctx.regionName} Volcano! 🌋 #flagsbattle`
+    : (ctx.mode === 'black_hole'
+      ? `😱 ${ctx.winnerHighlight} Escaped The Event Horizon In The ${ctx.regionName} Black Hole! 🌪️ #flagsbattle`
+      : (ctx.mode === 'bomb_tag'
+        ? `😱 ${ctx.winnerHighlight} In The Most Insane Hot Potato Bomb Battle! 💣 #flagsbattle`
+        : (ctx.mode === 'concentric_rings'
+          ? `😱 ${ctx.winnerHighlight} Found The Secret Gate In The ${ctx.regionName} Ring Maze! 🌀 #flagsbattle`
+          : (ctx.mode === 'circle_survivor'
+            ? `😱 ${ctx.winnerHighlight} In The ${ctx.regionName} Circle Survivor Ring! 🌪️ #flagsbattle`
+            : `😱 ${ctx.winnerHighlight} in the ${ctx.regionName} Flag Battle! 🏁 #flagsbattle`)))),
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `⚡ Extreme ${ctx.diff} Black Hole: ${ctx.count} Nations Trapped In Cosmic Orbit Before Singularity! 🪐 #shorts`
-    : (ctx.mode === 'bomb_tag'
-      ? `⚡ Extreme ${ctx.diff} Bomb Tag: ${ctx.count} Nations Bouncing & Passing TNT Before Detonation! 💥 #shorts`
-      : (ctx.mode === 'concentric_rings'
-        ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
-        : (ctx.mode === 'circle_survivor'
-          ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
-          : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `⚡ Extreme ${ctx.diff} Volcano: ${ctx.count} Nations Bouncing Above Burning Molten Magma! 🔥 #shorts`
+    : (ctx.mode === 'black_hole'
+      ? `⚡ Extreme ${ctx.diff} Black Hole: ${ctx.count} Nations Trapped In Cosmic Orbit Before Singularity! 🪐 #shorts`
+      : (ctx.mode === 'bomb_tag'
+        ? `⚡ Extreme ${ctx.diff} Bomb Tag: ${ctx.count} Nations Bouncing & Passing TNT Before Detonation! 💥 #shorts`
+        : (ctx.mode === 'concentric_rings'
+          ? `⚡ Extreme ${ctx.diff} Ring Maze: ${ctx.count} Nations Bouncing Through Counter-Rotating Doors! 🚀 #shorts`
+          : (ctx.mode === 'circle_survivor'
+            ? `⚡ Extreme ${ctx.diff} Battle Royale: ${ctx.count} Nations Bouncing To The Death! 💥 #shorts`
+            : `⚡ Extreme ${ctx.diff} Downhill Flag Race: ${ctx.count} Nations Battle to the Finish! 🚀 #shorts`)))),
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `🥇 ${ctx.winnerName} BECOMES THE ONLY COUNTRY TO SURVIVE THE BLACK HOLE! (${ctx.regionName}) 🏆 #marblerace`
-    : (ctx.mode === 'bomb_tag'
-      ? `🥇 ${ctx.winnerName} DODGES EVERY EXPLOSION TO WIN HOT POTATO! (${ctx.regionName} Edition) 🏆 #marblerace`
-      : (ctx.mode === 'concentric_rings'
-        ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
-        : (ctx.mode === 'circle_survivor'
-          ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
-          : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `🥇 ${ctx.winnerName} CONQUERS THE HIGHEST PEAK AND SURVIVES THE LAVA! (${ctx.regionName}) 🏆 #marblerace`
+    : (ctx.mode === 'black_hole'
+      ? `🥇 ${ctx.winnerName} BECOMES THE ONLY COUNTRY TO SURVIVE THE BLACK HOLE! (${ctx.regionName}) 🏆 #marblerace`
+      : (ctx.mode === 'bomb_tag'
+        ? `🥇 ${ctx.winnerName} DODGES EVERY EXPLOSION TO WIN HOT POTATO! (${ctx.regionName} Edition) 🏆 #marblerace`
+        : (ctx.mode === 'concentric_rings'
+          ? `🥇 ${ctx.winnerName} REACHES THE GOLDEN TROPHY CORE! (${ctx.regionName} Edition) 🏆 #marblerace`
+          : (ctx.mode === 'circle_survivor'
+            ? `🥇 ${ctx.winnerName} BECOMES LAST SURVIVOR! (${ctx.regionName} Ring Battle) 🏆 #marblerace`
+            : `🥇 ${ctx.winnerName} TAKES GOLD in Epic Downhill Battle! (${ctx.regionName} Edition) 🏆 #marblerace`)))),
 
   (ctx) => `🇮🇩 vs 🇺🇸 vs 🇧🇷: ${ctx.regionName} Flags Chaos Elimination! Who Survived? 💥 #shorts`,
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `🌌 CAN YOUR COUNTRY ESCAPE THE EVENT HORIZON?! 🪐 #blackhole #shorts`
-    : (ctx.mode === 'bomb_tag'
-      ? `💣 CAN YOUR COUNTRY PASS THE TICKING BOMB IN TIME?! 🌍 #bombtag #shorts`
-      : (ctx.mode === 'concentric_rings'
-        ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
-        : (ctx.mode === 'circle_survivor'
-          ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
-          : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `🌋 CAN YOUR COUNTRY ESCAPE THE RISING VOLCANO MAGMA?! 🌍 #lavarising #shorts`
+    : (ctx.mode === 'black_hole'
+      ? `🌌 CAN YOUR COUNTRY ESCAPE THE EVENT HORIZON?! 🪐 #blackhole #shorts`
+      : (ctx.mode === 'bomb_tag'
+        ? `💣 CAN YOUR COUNTRY PASS THE TICKING BOMB IN TIME?! 🌍 #bombtag #shorts`
+        : (ctx.mode === 'concentric_rings'
+          ? `🌀 CAN YOUR COUNTRY NAVIGATE 4 ROTATING MAZE RINGS?! 🌍 #ringmaze #shorts`
+          : (ctx.mode === 'circle_survivor'
+            ? `🌪️ CAN YOUR COUNTRY SURVIVE THE SPINNING VOID RING?! 🌍 #survivor #shorts`
+            : `🏎️ CAN YOUR COUNTRY WIN THIS CRAZY OBSTACLE COURSE?! 🌍 #flagrace #shorts`)))),
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `🏆 The Most Hypnotic Black Hole Marble Vortex You've Ever Seen! (${ctx.regionName}) 🌪️ #shorts`
-    : (ctx.mode === 'bomb_tag'
-      ? `🏆 The Most Chaotic Bomb Tag Marble Battle You've Ever Seen! (${ctx.regionName}) 💣 #shorts`
-      : (ctx.mode === 'concentric_rings'
-        ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-        : (ctx.mode === 'circle_survivor'
-          ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
-          : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `🏆 The Most Intense Floor Is Lava Marble Survival You've Ever Seen! (${ctx.regionName}) 🌋 #shorts`
+    : (ctx.mode === 'black_hole'
+      ? `🏆 The Most Hypnotic Black Hole Marble Vortex You've Ever Seen! (${ctx.regionName}) 🌪️ #shorts`
+      : (ctx.mode === 'bomb_tag'
+        ? `🏆 The Most Chaotic Bomb Tag Marble Battle You've Ever Seen! (${ctx.regionName}) 💣 #shorts`
+        : (ctx.mode === 'concentric_rings'
+          ? `🏆 The Most Hypnotic Concentric Ring Marble Maze You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+          : (ctx.mode === 'circle_survivor'
+            ? `🏆 The Most Brutal Circle Survivor Marble Battle You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`
+            : `🏆 The Craziest Downhill Marble Race You've Ever Seen! (${ctx.regionName}) 🌟 #shorts`)))),
 
   (ctx) => `🤯 Nobody Expected ${ctx.winnerName} To Win The ${ctx.regionName} Marble Battle! 🏁 #shorts`,
 
@@ -2868,15 +3234,17 @@ const VIRAL_TITLE_TEMPLATES = [
 
   (ctx) => `👑 Which Country Has The Best Luck? (${ctx.regionName} Tournament) 🌟 #flags #gaming`,
 
-  (ctx) => ctx.mode === 'black_hole'
-    ? `🕳️ 196 Countries Enter The Singularity... ONLY 1 RETURNS! 🚀 #shorts #space`
-    : (ctx.mode === 'bomb_tag'
-      ? `🧨 Ticking Time Bomb vs 196 Nations: Most Intense Game of Tag Ever! 💣 #shorts`
-      : (ctx.mode === 'concentric_rings'
-        ? `🚪 4 Revolving Maze Doors vs 196 Countries: Can Anyone Escape? 🌀 #shorts`
-        : (ctx.mode === 'circle_survivor'
-          ? `⚔️ 196 Countries In The Death Ring: Last Marble Standing Wins! 🛡️ #shorts`
-          : `🏃‍♂️ 196 Countries Race Through 8 Impossible Obstacles! 💥 #shorts`))),
+  (ctx) => ctx.mode === 'lava_rising'
+    ? `🔥 196 Countries vs RISING MAGMA: Floor Is Lava Extreme Edition! 🌋 #shorts`
+    : (ctx.mode === 'black_hole'
+      ? `🕳️ 196 Countries Enter The Singularity... ONLY 1 RETURNS! 🚀 #shorts #space`
+      : (ctx.mode === 'bomb_tag'
+        ? `🧨 Ticking Time Bomb vs 196 Nations: Most Intense Game of Tag Ever! 💣 #shorts`
+        : (ctx.mode === 'concentric_rings'
+          ? `🚪 4 Revolving Maze Doors vs 196 Countries: Can Anyone Escape? 🌀 #shorts`
+          : (ctx.mode === 'circle_survivor'
+            ? `⚔️ 196 Countries In The Death Ring: Last Marble Standing Wins! 🛡️ #shorts`
+            : `🏃‍♂️ 196 Countries Race Through 8 Impossible Obstacles! 💥 #shorts`)))),
 
   (ctx) => `⚠️ WARNING: This ${ctx.regionName} Marble Battle Is Extremely Addictive! 🏁 #satisfying #shorts`,
 
@@ -2959,7 +3327,11 @@ function updateVideoTitles(winner = null) {
   let modeTitle = "Downhill Marble Race Simulator";
   let modeRules = "8 brutal physical obstacle stages downhill.";
 
-  if (currentGameMode === 'black_hole') {
+  if (currentGameMode === 'lava_rising') {
+    modeTitle = "Lava Rising Volcano Floor Simulator";
+    modeRules = "Molten magma rises from the bottom! Marbles must bounce on moving platforms to stay alive. The floor is lava—last survivor wins!";
+    winText = winner ? `🥇 Volcano Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will stay above the rising molten lava?`;
+  } else if (currentGameMode === 'black_hole') {
     modeTitle = "Black Hole Cosmic Vortex Simulator";
     modeRules = "Escalating gravitational singularity! Orbiting nations bounce and get spaghettified into the void. Only the last survivor escapes.";
     winText = winner ? `🥇 Singularity Survivor Champion: ${winner.name} ${getFlagEmoji(winner.code)}` : `Who will escape the cosmic event horizon?`;
@@ -2995,7 +3367,7 @@ ${modeRules}
 "Which country should I root for in the next race? Drop your flags below! 🚩👇"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#shorts #marblerace #flagsbattle #blackhole #bombtag #ringmaze #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral #tiktok #reels #satisfying #fyp #foryou #entertainment #trending`;
+#shorts #marblerace #flagsbattle #lavarising #thefloorislava #blackhole #bombtag #ringmaze #circlesurvivor #battleroyale #geography #countryballs #worldflags #gaming #viral #tiktok #reels #satisfying #fyp #foryou #entertainment #trending`;
 
   const tagsBox = document.getElementById('videoTagsBox');
   if (tagsBox) tagsBox.value = desc;
