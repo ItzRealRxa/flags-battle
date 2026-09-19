@@ -138,21 +138,12 @@ class Marble {
 
   update() {
     if (this.finished) {
-      if (currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag' || currentGameMode === 'black_hole') {
-        // Eliminated marbles disappear completely from the arena
+      // In ALL game modes, any killed or finished marble disappears completely (except 1st place champion)
+      if (this !== winnerMarble) {
         return;
       }
-      if (currentGameMode === 'concentric_rings') {
-        // Marbles that reach the core settle gently in the winner circle
-        this.vx *= 0.88;
-        this.vy *= 0.88;
-        this.x += this.vx;
-        this.y += this.vy;
-        return;
-      }
-      // Downhill Race: Gentle slide in podium area
-      this.vx *= 0.92;
-      this.vy *= 0.92;
+      this.vx *= 0.88;
+      this.vy *= 0.88;
       this.x += this.vx;
       this.y += this.vy;
       return;
@@ -386,8 +377,8 @@ class Marble {
   }
 
   draw(ctx) {
-    // In Circle Survivor & Bomb Tag modes, eliminated marbles disappear completely from the screen
-    if ((currentGameMode === 'circle_survivor' || currentGameMode === 'bomb_tag') && this.finished && this !== winnerMarble) {
+    // In ALL game modes, any killed or finished marble disappears completely from the screen (except 1st place champion)
+    if (this.finished && this !== winnerMarble) {
       return;
     }
 
